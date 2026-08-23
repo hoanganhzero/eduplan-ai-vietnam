@@ -156,9 +156,9 @@ const roleMeta: Record<
   teacher: {
     label: "Giáo viên",
     welcome: "Chào thầy Hoàng Anh",
-    subtitle: "Quản lý lớp, soạn giảng bằng AI, giao bài và đánh giá học sinh.",
+    subtitle: "Quản lý lớp, tạo học liệu số, giao bài và đánh giá học sinh.",
     color: "#0891b2",
-    menu: ["Tổng quan", "Lớp của tôi", "eLearning tại nhà", "Trình chiếu trên lớp", "Luyện tập & kiểm tra", "AI soạn giảng", "Bài tập", "Chấm bài"],
+    menu: ["Tổng quan", "Lớp của tôi", "eLearning tại nhà", "Trình chiếu trên lớp", "Luyện tập & kiểm tra", "Bài tập", "Chấm bài"],
   },
   student: {
     label: "Học sinh",
@@ -183,6 +183,31 @@ const roleMeta: Record<
   },
 };
 
+function vietnamGreeting(date = new Date()) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(date),
+  );
+  if (hour < 11) return "Chào buổi sáng";
+  if (hour < 13) return "Chào buổi trưa";
+  if (hour < 18) return "Chào buổi chiều";
+  return "Chào buổi tối";
+}
+
+function useVietnamGreeting() {
+  const [greeting, setGreeting] = useState("Xin chào");
+  useEffect(() => {
+    const updateGreeting = () => setGreeting(vietnamGreeting());
+    updateGreeting();
+    const timer = window.setInterval(updateGreeting, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return greeting;
+}
+
 export default function Home() {
   const [role, setRole] = useState<Role>("teacher");
   const [view, setView] = useState("Tổng quan");
@@ -205,6 +230,7 @@ export default function Home() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [services, setServices] = useState<Record<string, boolean>>({});
+  const greeting = useVietnamGreeting();
   const notify = useCallback((message: string) => {
     setToast(message);
     window.setTimeout(() => setToast(""), 2600);
@@ -508,7 +534,7 @@ export default function Home() {
       </div>
     );
   if (!session?.authenticated || !session.account)
-    return <PublicHome registered={Boolean(session?.authenticated)} />;
+    return <PublicHome registered={Boolean(session?.authenticated)} greeting={greeting} />;
   if (session.account.status !== "active")
     return <AuthPending name={session.account.name} />;
 
@@ -634,7 +660,7 @@ export default function Home() {
           <div className={`page-head ${view === "Tổng quan" ? "overview-head" : ""}`}>
             <div>
               <span>EDUPLAN AI · {roleMeta[role].label.toUpperCase()}</span>
-              <h1>{view === "Tổng quan" ? `Chào buổi sáng, ${session.account.name}` : view}</h1>
+              <h1>{view === "Tổng quan" ? `${greeting}, ${session.account.name}` : view}</h1>
               <p>
                 {view === "Tổng quan"
                   ? roleMeta[role].subtitle
@@ -738,12 +764,6 @@ export default function Home() {
               )}
               {role === "teacher" && view === "Trình chiếu trên lớp" && (
                 <ClassroomPresentationStudio notify={notify} />
-              )}
-              {role === "teacher" && view === "AI soạn giảng" && (
-                <AiStudio
-                  onCreate={() => setModal("lesson")}
-                  onAction={notify}
-                />
               )}
               {role === "teacher" && view === "Bài tập" && (
                 <Assignments
@@ -906,7 +926,7 @@ export default function Home() {
   );
 }
 
-function PublicHome({ registered }: { registered: boolean }) {
+function PublicHome({ registered, greeting }: { registered: boolean; greeting: string }) {
   const [authMode, setAuthMode] = useState<"login" | "register" | null>(
     registered ? "register" : null,
   );
@@ -941,13 +961,13 @@ function PublicHome({ registered }: { registered: boolean }) {
           <div className="simple-trust" aria-label="Ưu điểm nổi bật">
             <span>✓ Giao diện theo vai trò</span>
             <span>✓ Lưu tiến độ học tập</span>
-            <span>✓ AI hỗ trợ soạn giảng</span>
+            <span>✓ Công cụ dạy học đồng bộ</span>
           </div>
         </div>
 
         <div className="simple-dashboard" aria-label="Minh họa bảng điều khiển EduPlan AI">
           <div className="simple-dashboard-top"><span>EP</span><b>Bảng điều khiển giáo viên</b><i>●</i></div>
-          <div className="simple-welcome"><div><small>CHÀO BUỔI SÁNG</small><strong>Sẵn sàng cho tiết học hôm nay?</strong></div><span>＋ Tạo nội dung</span></div>
+          <div className="simple-welcome"><div><small>{greeting.toUpperCase()}</small><strong>Sẵn sàng cho tiết học hôm nay?</strong></div><span>＋ Tạo nội dung</span></div>
           <div className="simple-quick-grid">
             <article><span>▶</span><div><b>Bài học eLearning</b><small>Video và câu hỏi tương tác</small></div></article>
             <article><span>▣</span><div><b>Trình chiếu trên lớp</b><small>Nội dung giảng dạy trực quan</small></div></article>
@@ -1994,50 +2014,6 @@ function Settings({
     </div>
   );
 }
-function AiStudio({
-  onCreate,
-  onAction,
-}: {
-  onCreate: () => void;
-  onAction: (m: string) => void;
-}) {
-  return (
-    <div className="ai-layout">
-      <section className="ai-hero">
-        <span>✦ TRỢ LÝ AI SOẠN GIẢNG</span>
-        <h2>Một chủ đề, trọn bộ học liệu.</h2>
-        <p>
-          AI xây dựng nội dung theo CTGDPT 2018 và cấu trúc hoạt động của Công
-          văn 5512.
-        </p>
-        <button onClick={onCreate}>✦ Bắt đầu tạo bài dạy →</button>
-      </section>
-      <div className="ai-tools">
-        {[
-          ["KHBD 5512", "Mục tiêu, thiết bị, tiến trình 4 hoạt động"],
-          ["Slide bài giảng", "Bố cục trình chiếu và ghi chú giáo viên"],
-          ["Phiếu học tập", "Câu hỏi, nhiệm vụ và tiêu chí đánh giá"],
-          ["Ngân hàng câu hỏi", "Trắc nghiệm, tự luận kèm đáp án"],
-        ].map((t, i) => (
-          <article key={t[0]}>
-            <span>{["✦", "▰", "▤", "✓"][i]}</span>
-            <div>
-              <b>{t[0]}</b>
-              <small>{t[1]}</small>
-            </div>
-            <button
-              onClick={() =>
-                i === 0 ? onCreate() : onAction(`Đã mở công cụ ${t[0]}`)
-              }
-            >
-              Mở →
-            </button>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
 function LearningResources({ assignments }: { assignments: Assignment[] }) {
   const files = assignments.flatMap((assignment) => (assignment.attachments || []).map((file) => ({ ...file, assignment: assignment.title })));
   if (!files.length) return <EmptyData title="Chưa có học liệu" note="Tệp giáo viên đính kèm trong bài tập sẽ xuất hiện tại đây." />;
@@ -2497,7 +2473,6 @@ function descriptionFor(view: string) {
     "eLearning tại nhà": "Tạo video tự học, khóa tua và chèn câu hỏi bắt buộc theo mốc thời gian.",
     "Trình chiếu trên lớp": "Tạo bài trình chiếu web có nội dung, từ khóa, sơ đồ tư duy và hoạt động tương tác.",
     "Học trực tuyến": "Học từng hoạt động, làm bài tương tác và lưu tiến độ tự động.",
-    "AI soạn giảng": "Tạo KHBD, slide, phiếu học tập và câu hỏi.",
     "Bài tập": "Giao, nhận và theo dõi tiến độ nộp bài.",
     "Chấm bài": "Chấm điểm, viết phản hồi và trả kết quả.",
     "Học liệu": "Tài liệu, bài trình chiếu và video học tập.",
