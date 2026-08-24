@@ -11,11 +11,12 @@ Biến môi trường (xem `.env.example`): `SUPABASE_URL`,
 `ZALO_ACCESS_TOKEN` (gửi thông báo Zalo OA — tùy chọn).
 
 Sau khi kéo mã nguồn mới, chạy toàn bộ tệp trong `supabase/migrations/` theo
-thứ tự tên tệp trên SQL Editor của Supabase. Bản cập nhật gần nhất
-(`20260823_extend_workspace_actions.sql`) bổ sung các thao tác: học sinh tham
-gia lớp bằng mã, nhắn tin phụ huynh–giáo viên, đánh dấu đã đọc thông báo và
-nộp bài kiểm tra trực tuyến — thiếu migration này các chức năng đó sẽ báo lỗi
-"Thao tác dữ liệu không được hỗ trợ".
+thứ tự tên tệp trên SQL Editor của Supabase. Bản mới nhất
+(`20260824_online_exam_controls.sql`) đã bao trùm bản 20260823, gồm: học sinh
+tham gia lớp bằng mã (có chuẩn hóa mã nhập), nhắn tin phụ huynh–giáo viên,
+đánh dấu đã đọc thông báo, nộp bài kiểm tra trực tuyến và giới hạn số lần làm
+bài phía máy chủ — thiếu migration này các chức năng đó sẽ báo lỗi kèm hướng
+dẫn chạy migration.
 
 ---
 

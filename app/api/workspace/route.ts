@@ -9,6 +9,12 @@ async function tokenFor(request: Request) {
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Không thể xử lý dữ liệu";
+  if (message === "Thao tác dữ liệu không được hỗ trợ") {
+    return Response.json(
+      { error: "Cơ sở dữ liệu chưa được cập nhật. Quản trị viên hãy chạy tệp supabase/migrations/20260824_online_exam_controls.sql trong SQL Editor của Supabase rồi thử lại." },
+      { status: 503 },
+    );
+  }
   const status = message === "Cần đăng nhập" ? 401 : message.startsWith("Chỉ ") ? 403 : 400;
   return Response.json({ error: message }, { status });
 }

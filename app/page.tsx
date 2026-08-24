@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { ELearningModule } from "./elearning";
 import { ClassroomPresentationStudio } from "./classroom-presentation";
 import { AssignmentComposer, type AssignmentAttachment } from "./assignment-composer";
@@ -138,6 +139,7 @@ type Workspace = {
   attendanceSessions: AttendanceSession[];
   parentLinks: Record<string, ParentLink>;
   lessonPlans: Array<Record<string, unknown>>;
+  examMatrices: Array<Record<string, unknown>>;
   submissions: number;
   attendance: number;
 };
@@ -160,6 +162,7 @@ const initialWorkspace: Workspace = {
   attendanceSessions: [],
   parentLinks: {},
   lessonPlans: [],
+  examMatrices: [],
   submissions: 0,
   attendance: 0,
 };
@@ -183,6 +186,7 @@ function normalizeWorkspace(value: unknown): Workspace {
     attendanceSessions: Array.isArray(source.attendanceSessions) ? source.attendanceSessions : [],
     parentLinks: source.parentLinks && typeof source.parentLinks === "object" ? source.parentLinks : {},
     lessonPlans: Array.isArray(source.lessonPlans) ? source.lessonPlans : [],
+    examMatrices: Array.isArray(source.examMatrices) ? source.examMatrices : [],
     submissions: records.length,
     attendance: Number(source.attendance || 0),
   };
@@ -255,6 +259,7 @@ export default function Home() {
     null,
   );
   const [attendanceClass, setAttendanceClass] = useState<Workspace["classes"][number] | null>(null);
+  const [qrClass, setQrClass] = useState<Workspace["classes"][number] | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [services, setServices] = useState<Record<string, boolean>>({});
@@ -623,7 +628,18 @@ export default function Home() {
     }
   };
   const joinClass = async (code: string) => {
-    const result = await workspaceAction({ action: "join_class", code });
+    // Chuẩn hóa mã: bỏ dấu tiếng Việt, ký tự thừa và tiền tố "LỚP" nếu có.
+    const cleaned = code
+      .normalize("NFD")
+      .replace(/\p{M}/gu, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .replace(/^LOP/, "");
+    if (!cleaned) {
+      notify("Vui lòng nhập mã lớp", "error");
+      return false;
+    }
+    const result = await workspaceAction({ action: "join_class", code: cleaned });
     if (result) notify(result.alreadyJoined ? `Em đã ở trong lớp ${result.className}` : `Đã tham gia lớp ${result.className}`);
     return Boolean(result);
   };
@@ -701,6 +717,25 @@ export default function Home() {
     });
     return [...map.values()];
   })();
+  // Học sinh quét mã QR (đường dẫn /?join=MÃ) sẽ được tham gia lớp ngay sau
+  // khi đăng nhập thành công.
+  useEffect(() => {
+    if (authLoading || !session?.account || session.account.status !== "active") return;
+    const params = new URLSearchParams(window.location.search);
+    const join = params.get("join");
+    if (!join) return;
+    window.history.replaceState({}, "", "/");
+    const role = session.account.role;
+    queueMicrotask(() => {
+      if (role === "student") {
+        setView("Lớp học");
+        void joinClass(join);
+      } else {
+        notify("Liên kết tham gia lớp chỉ dành cho tài khoản học sinh", "error");
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, session]);
   useEffect(() => {
     if (view !== "Thông báo" || unreadNotifications === 0) return;
     if (window.location.hostname === "terminal.local") return;
@@ -966,6 +1001,7 @@ export default function Home() {
                 <ClassesGrid
                   classes={visibleClasses}
                   onAttendance={setAttendanceClass}
+                  onQr={setQrClass}
                 />
               )}
               {(role === "teacher" || role === "student") && view === "Luyện tập & kiểm tra" && (
@@ -1155,6 +1191,7 @@ export default function Home() {
           }}
         />
       )}
+      {qrClass && <ClassQrModal classInfo={qrClass} close={() => setQrClass(null)} notify={notify} />}
       {attendanceClass && (
         <AttendanceModal
           classInfo={attendanceClass}
@@ -2204,11 +2241,13 @@ function ClassesGrid({
   admin,
   joinNote,
   onAttendance,
+  onQr,
 }: {
   classes: Workspace["classes"];
   admin?: boolean;
   joinNote?: boolean;
   onAttendance?: (c: Workspace["classes"][number]) => void;
+  onQr?: (c: Workspace["classes"][number]) => void;
 }) {
   return (
     <div className="class-grid">
@@ -2230,6 +2269,7 @@ function ClassesGrid({
             </div>
             <div>
               <CopyCodeButton code={c.code} />
+              {onQr && <button onClick={() => onQr(c)}>Mã QR</button>}
               {onAttendance && (
                 <button onClick={() => onAttendance(c)}>Điểm danh</button>
               )}
@@ -2639,8 +2679,8 @@ function JoinClassPanel({ onJoin, busy }: { onJoin: (code: string) => Promise<bo
   return (
     <section className="join-class-panel">
       <div>
-        <b>Tham gia lớp học bằng mã</b>
-        <small>Nhập mã do giáo viên cung cấp (ví dụ: 10A426) để vào lớp và nhận bài tập.</small>
+        <b>Tham gia lớp học bằng mã hoặc quét QR</b>
+        <small>Nhập mã do giáo viên cung cấp (ví dụ: 10A426), hoặc dùng điện thoại quét mã QR của lớp — hệ thống sẽ tự đưa em vào lớp.</small>
       </div>
       <div className="join-class-form">
         <input
@@ -2823,6 +2863,68 @@ function MessagesPanel({
         </div>
       </section>
     </div>
+  );
+}
+
+function ClassQrModal({
+  classInfo,
+  close,
+  notify,
+}: {
+  classInfo: Workspace["classes"][number];
+  close: () => void;
+  notify: (message: string, tone?: "success" | "error") => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const joinUrl = `${window.location.origin}/?join=${encodeURIComponent(classInfo.code)}`;
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, joinUrl, { width: 260, margin: 1, color: { dark: "#0b1f44", light: "#ffffff" } }).catch(() =>
+      notify("Không thể tạo mã QR trên trình duyệt này", "error"),
+    );
+  }, [joinUrl, notify]);
+  return (
+    <ModalShell title={`Mời vào lớp ${classInfo.name}`} close={close}>
+      <div className="class-qr">
+        <canvas ref={canvasRef} aria-label={`Mã QR tham gia lớp ${classInfo.name}`} />
+        <p>
+          Học sinh có 2 cách tham gia lớp: <b>quét mã QR</b> bằng điện thoại
+          (tự mở trang và vào lớp sau khi đăng nhập), hoặc <b>nhập mã lớp</b>{" "}
+          trong mục Lớp học.
+        </p>
+        <div className="class-qr-code">
+          <small>MÃ LỚP</small>
+          <b>{classInfo.code}</b>
+        </div>
+        <div className="class-qr-actions">
+          <CopyCodeButton code={classInfo.code} />
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(joinUrl);
+                notify("Đã sao chép liên kết tham gia lớp");
+              } catch {
+                notify("Không thể sao chép liên kết", "error");
+              }
+            }}
+          >
+            Sao chép liên kết
+          </button>
+          <button
+            onClick={() => {
+              const canvas = canvasRef.current;
+              if (!canvas) return;
+              const link = document.createElement("a");
+              link.href = canvas.toDataURL("image/png");
+              link.download = `QR-lop-${classInfo.code}.png`;
+              link.click();
+            }}
+          >
+            ⇩ Tải ảnh QR
+          </button>
+        </div>
+      </div>
+    </ModalShell>
   );
 }
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { detectQuestions, extractDocxLines } from "./docx-import";
+import { MatrixBuilder } from "./matrix-builder";
 
 type Role = "teacher" | "student";
 type Notice = (message: string, tone?: "success" | "error") => void;
@@ -22,7 +24,7 @@ export type ExamQuestion = {
   question: string;
   options?: string[];
   answer?: number | string;
-  statements?: Array<{ text: string; answer: boolean }>;
+  statements?: Array<{ text: string; answer?: boolean }>;
   guide?: string;
   points: number;
 };
@@ -43,6 +45,9 @@ type AssessmentRecord = {
   includeAnswerKey?: boolean;
   sourceFile?: unknown;
   createdAt?: string;
+  attempts?: number;
+  shuffleOnline?: boolean;
+  antiCheat?: boolean;
 };
 type AssessmentResult = {
   id: string;
@@ -54,7 +59,16 @@ type AssessmentResult = {
   essayPending?: boolean;
   submittedAt?: string;
   answers?: Record<string, unknown>;
+  attemptCount?: number;
+  violations?: number;
+  violationEvents?: Array<{ type: string; at: string }>;
 };
+
+// Số lần làm cho phép: 0 = không giới hạn; mặc định Luyện tập không giới hạn,
+// các hình thức khác 1 lần.
+export function allowedAttempts(record: { attempts?: number; kind: string }) {
+  return record.attempts ?? (record.kind === "Luyện tập" ? 0 : 1);
+}
 
 const templates = {
   "Ngữ văn": { time: 90, label: "Tự luận · 10 điểm", file: "Mau-de-Ngu-van.doc", parts: ["Đọc hiểu: 4,0 điểm · ngữ liệu ngoài SGK", "Viết đoạn nghị luận xã hội", "Viết bài nghị luận văn học/xã hội · phần Viết 6,0 điểm"], counts: { choice: 0, trueFalse: 0, short: 0, essay: 5 } },
@@ -108,9 +122,26 @@ export function gradeExam(questions: ExamQuestion[], answers: Record<string, unk
       const correct = statements.filter((statement, index) => Boolean(picks[index]) === statement.answer).length;
       score += question.points * trueFalseRatio(correct, statements.length);
     } else if (question.type === "short") {
-      if (normalizeText(String(answer ?? "")) !== "" && normalizeText(String(answer ?? "")) === normalizeText(String(question.answer ?? ""))) score += question.points;
+      const given = normalizeText(String(answer ?? ""));
+      const accepted = String(question.answer ?? "").split("|").map(normalizeText).filter(Boolean);
+      if (given !== "" && accepted.includes(given)) score += question.points;
     } else if (question.type === "essay") {
-      if (String(answer ?? "").trim()) essayPending = true;
+      const response = String(answer ?? "").trim();
+      if (!response) continue;
+      const key = String(question.answer ?? "").trim();
+      if (!key) { essayPending = true; continue; }
+      // Tự chấm theo ý: mỗi dòng đáp án là một ý; ý được tính khi phần lớn
+      // từ khóa của ý xuất hiện trong bài làm của học sinh.
+      const responseNormalized = normalizeText(response);
+      const ideas = key.split("\n").map(normalizeText).filter(Boolean);
+      const matched = ideas.filter((idea) => {
+        if (responseNormalized.includes(idea)) return true;
+        const words = idea.split(" ").filter((word) => word.length > 2);
+        if (!words.length) return false;
+        const hits = words.filter((word) => responseNormalized.includes(word)).length;
+        return hits / words.length >= 0.6;
+      }).length;
+      if (ideas.length) score += question.points * (matched / ideas.length);
     }
   }
   return { score: Math.round(score * 100) / 100, total: Math.round(total * 100) / 100, essayPending };
@@ -253,12 +284,19 @@ export function AssessmentStudio({ role, notify, accountKey = "" }: { role: Role
 
 function TeacherAssessments({ notify }: { notify: Notice }) {
   const [creating, setCreating] = useState(false);
+  const [matrixOpen, setMatrixOpen] = useState(false);
   const [subject, setSubject] = useState<Subject>("Toán");
   const [kind, setKind] = useState<TestKind>("Thường xuyên");
   const [mode, setMode] = useState<"manual" | "ai">("manual");
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [manualFile, setManualFile] = useState<File | null>(null);
+  const [importedQuestions, setImportedQuestions] = useState<ExamQuestion[] | null>(null);
+  const [importNote, setImportNote] = useState("");
+  const [attempts, setAttempts] = useState<number | null>(null);
+  const [shuffleOnline, setShuffleOnline] = useState(true);
+  const [antiCheat, setAntiCheat] = useState(true);
+  const [typePoints, setTypePoints] = useState({ choice: 0.25, trueFalse: 1, short: 0.5, essay: 1 });
   const [aiContent, setAiContent] = useState("");
   const [aiMatrixNote, setAiMatrixNote] = useState("");
   const [aiQuestions, setAiQuestions] = useState<ExamQuestion[]>([]);
@@ -266,7 +304,6 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
   const [examHeader, setExamHeader] = useState<ExamHeader>({ authority: "SỞ GD&ĐT TÂY NINH", school: "TRUNG TÂM GDNN-GDTX KHU VỰC TÂN NINH", examName: "KIỂM TRA HỌC KỲ 1", schoolYear: "2025 - 2026", duration: 90, pageCount: 2 });
   const [variantCount, setVariantCount] = useState(4);
   const [firstCode, setFirstCode] = useState(101);
-  const [variantMode, setVariantMode] = useState<VariantMode>("shuffle");
   const [shuffleQuestions, setShuffleQuestions] = useState(true);
   const [shuffleAnswers, setShuffleAnswers] = useState(true);
   const [includeAnswerKey, setIncludeAnswerKey] = useState(true);
@@ -315,8 +352,58 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
     setCounts({ ...templates[next].counts });
     setExamHeader((current) => ({ ...current, duration: templates[next].time }));
     setManualFile(null);
+    setImportedQuestions(null);
+    setImportNote("");
     setAiQuestions([]);
   };
+  // Đọc và nhận diện câu hỏi ngay khi giáo viên chọn tệp Word.
+  const importWord = async (file: File | null) => {
+    setManualFile(file);
+    setImportedQuestions(null);
+    setImportNote("");
+    if (!file) return;
+    try {
+      const lines = await extractDocxLines(file);
+      const detected = detectQuestions(lines);
+      if (!detected.questions.length) {
+        setImportNote("Không nhận diện được câu hỏi nào (cần bắt đầu mỗi câu bằng 'Câu 1.', 'Câu 2.'...). Đề vẫn được lưu dưới dạng tệp để in ấn.");
+        return;
+      }
+      setImportedQuestions(detected.questions);
+      setImportNote(`Đã nhận diện ${detected.questions.length} câu hỏi, trong đó ${detected.answered} câu tự bắt được đáp án (chữ đỏ/gạch chân). Hãy duyệt và bổ sung đáp án bên dưới.`);
+      notify(`Đã nhận diện ${detected.questions.length} câu hỏi từ tệp Word`);
+    } catch (error) {
+      setImportNote(error instanceof Error ? error.message : "Không đọc được tệp Word; đề vẫn được lưu dưới dạng tệp.");
+    }
+  };
+  // Ngân hàng câu hỏi đang biên tập (AI hoặc nhận diện từ Word) để áp điểm.
+  const activeBank = mode === "ai" ? aiQuestions : importedQuestions || [];
+  const setActiveBank = (questions: ExamQuestion[]) => {
+    if (mode === "ai") setAiQuestions(questions);
+    else setImportedQuestions(questions);
+  };
+  const bankTotal = Math.round(activeBank.reduce((sum, question) => sum + question.points, 0) * 100) / 100;
+  const typeKeyOf = (type: ExamQuestion["type"]) => (type === "true_false" ? "trueFalse" : type) as keyof typeof typePoints;
+  const applyTypePoints = () => {
+    setActiveBank(activeBank.map((question) => ({ ...question, points: typePoints[typeKeyOf(question.type)] })));
+    notify("Đã áp dụng điểm theo dạng cho tất cả câu hỏi");
+  };
+  const normalizeToTen = () => {
+    if (!bankTotal) return notify("Chưa có câu hỏi để chia điểm", "error");
+    const scale = 10 / bankTotal;
+    const scaled = activeBank.map((question) => ({ ...question, points: Math.max(0.05, Math.round(question.points * scale * 100) / 100) }));
+    // Dồn phần lệch do làm tròn vào câu cuối để tổng đúng bằng 10.
+    const drift = Math.round((10 - scaled.reduce((sum, question) => sum + question.points, 0)) * 100) / 100;
+    if (scaled.length && Math.abs(drift) >= 0.01) scaled[scaled.length - 1] = { ...scaled[scaled.length - 1], points: Math.max(0.05, Math.round((scaled[scaled.length - 1].points + drift) * 100) / 100) };
+    setActiveBank(scaled);
+    notify("Đã chuẩn hóa tổng điểm toàn đề về thang 10");
+  };
+  const incompleteCount = (questions: ExamQuestion[]) =>
+    questions.filter((question) =>
+      question.type === "choice" ? question.answer === undefined || !question.options?.length :
+      question.type === "true_false" ? !(question.statements || []).length || (question.statements || []).some((statement) => statement.answer === undefined) :
+      question.type === "short" ? !String(question.answer || "").trim() : false,
+    ).length;
   const downloadTemplate = () => {
     const blob = new Blob(["﻿", buildWordTemplate(subject, kind, examHeader, firstCode)], { type: "application/msword;charset=utf-8" });
     const link = document.createElement("a");
@@ -344,12 +431,17 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
   const create = async () => {
     if (!title.trim()) return notify("Vui lòng nhập tên bài kiểm tra", "error");
     if (variantCount < 1 || variantCount > 50) return notify("Số mã đề phải từ 1 đến 50", "error");
+    const onlineConfig = {
+      ...(attempts !== null ? { attempts } : {}),
+      shuffleOnline,
+      antiCheat,
+    };
     if (mode === "ai") {
       if (!aiQuestions.length) return notify("Hãy bấm 'Tạo câu hỏi bằng AI' và duyệt câu hỏi trước khi lưu đề", "error");
       const record: AssessmentRecord = {
         id: String(Date.now()), title: title.trim(), subject, kind, time: examHeader.duration, status: "Bản nháp",
         questions: aiQuestions, header: examHeader, variantCount, firstCode, variantMode: "shuffle",
-        shuffleQuestions, shuffleAnswers, includeAnswerKey, createdAt: new Date().toISOString(),
+        shuffleQuestions, shuffleAnswers, includeAnswerKey, createdAt: new Date().toISOString(), ...onlineConfig,
       };
       const ok = await mutateWorkspace(
         (data) => ({ ...data, assessments: [record, ...(Array.isArray(data.assessments) ? data.assessments as AssessmentRecord[] : [])] }),
@@ -358,21 +450,31 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
       if (ok) { setCreating(false); setAiQuestions([]); setTitle(""); }
       return;
     }
-    if (!manualFile) return notify("Vui lòng tải đề Word theo đúng mẫu môn học", "error");
-    if (!shuffleQuestions && !shuffleAnswers && variantMode === "shuffle" && variantCount > 1) return notify("Hãy chọn đảo câu hỏi hoặc đảo đáp án để tạo nhiều mã đề", "error");
-    if (variantMode === "similar") return notify("AI sinh đề tương tự chỉ khả dụng với đề tạo bằng AI (mục Tạo tự động), vì hệ thống chưa đọc được nội dung tệp Word.", "error");
+    if (!manualFile) return notify("Vui lòng tải tệp đề Word (.docx)", "error");
+    if (importedQuestions?.length) {
+      const incomplete = incompleteCount(importedQuestions);
+      if (incomplete > 0) return notify(`Còn ${incomplete} câu chưa chọn/điền đáp án. Hãy hoàn tất trong phần duyệt câu hỏi bên dưới.`, "error");
+    }
+    if (!shuffleQuestions && !shuffleAnswers && variantCount > 1) return notify("Hãy chọn đảo câu hỏi hoặc đảo đáp án để tạo nhiều mã đề", "error");
     setBusy(true);
     try {
       const upload = new FormData(); upload.append("file", manualFile);
       const uploadResponse = await fetch("/api/assignment-files", { method: "POST", body: upload });
       const uploadResult = await uploadResponse.json();
       if (!uploadResponse.ok || !uploadResult.file) throw new Error(uploadResult.error || "Không thể lưu tệp đề Word");
-      const record: AssessmentRecord = { id: String(Date.now()), title: title.trim(), subject, kind, time: examHeader.duration, status: "Bản nháp", sourceFile: uploadResult.file, header: examHeader, variantCount, firstCode, variantMode, shuffleQuestions, shuffleAnswers, includeAnswerKey, createdAt: new Date().toISOString() };
+      const record: AssessmentRecord = {
+        id: String(Date.now()), title: title.trim(), subject, kind, time: examHeader.duration, status: "Bản nháp",
+        sourceFile: uploadResult.file, header: examHeader, variantCount, firstCode, variantMode: "shuffle",
+        shuffleQuestions, shuffleAnswers, includeAnswerKey, createdAt: new Date().toISOString(), ...onlineConfig,
+        ...(importedQuestions?.length ? { questions: importedQuestions } : {}),
+      };
       const ok = await mutateWorkspace(
         (data) => ({ ...data, assessments: [record, ...(Array.isArray(data.assessments) ? data.assessments as AssessmentRecord[] : [])] }),
-        "Đã tải và lưu đề Word thật trên Supabase dưới dạng bản nháp",
+        importedQuestions?.length
+          ? "Đã lưu đề Word với ngân hàng câu hỏi. Bấm Xuất bản để học sinh làm trực tuyến."
+          : "Đã lưu tệp đề Word (chưa nhận diện được câu hỏi nên chỉ dùng để in ấn).",
       );
-      if (ok) { setCreating(false); setTitle(""); setManualFile(null); }
+      if (ok) { setCreating(false); setTitle(""); setManualFile(null); setImportedQuestions(null); setImportNote(""); }
     } catch (error) { notify(error instanceof Error ? error.message : "Không thể lưu đề", "error"); }
     finally { setBusy(false); }
   };
@@ -393,8 +495,10 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
     );
   };
 
+  if (matrixOpen) return <MatrixBuilder notify={notify} onExit={() => setMatrixOpen(false)} />;
+
   return <section className="assessment-shell">
-    <div className="assessment-hero"><div><small>ASSESSMENT STUDIO</small><h2>Tạo đề từ mẫu Word hoặc tự động bằng AI</h2><p>Nhập đề Word có sẵn, hoặc dán ngữ liệu bài học để AI tạo ngân hàng câu hỏi thật — sau đó xuất bản cho học sinh làm trực tuyến và tự chấm.</p><button onClick={() => setCreating(true)}>＋ Tạo bài mới</button></div><div className="assessment-hero-stats"><b>05<small>Mẫu môn học</small></b><b>04<small>Dạng câu hỏi</small></b><b>AI<small>Bám ngữ liệu thật</small></b></div></div>
+    <div className="assessment-hero"><div><small>ASSESSMENT STUDIO</small><h2>Tạo đề từ mẫu Word hoặc tự động bằng AI</h2><p>Nhập đề Word có sẵn, hoặc dán ngữ liệu bài học để AI tạo ngân hàng câu hỏi thật — sau đó xuất bản cho học sinh làm trực tuyến và tự chấm.</p><div className="assessment-hero-actions"><button onClick={() => setCreating(true)}>＋ Tạo bài mới</button><button className="matrix-open" onClick={() => setMatrixOpen(true)}>▦ Ma trận & đặc tả 7991</button></div></div><div className="assessment-hero-stats"><b>05<small>Mẫu môn học</small></b><b>04<small>Dạng câu hỏi</small></b><b>AI<small>Bám ngữ liệu thật</small></b></div></div>
     <div className="assessment-type-row">{(["Luyện tập", "Thường xuyên", "Giữa học kỳ", "Học kỳ"] as TestKind[]).map((item, index) => <article key={item}><span>{["✦", "✓", "◷", "▣"][index]}</span><div><b>{item}</b><small>{index === 0 ? "Không giới hạn lần làm" : index === 1 ? "Đánh giá quá trình" : index === 2 ? "Theo ma trận giữa kỳ" : "Tổng kết học kỳ"}</small></div></article>)}</div>
     <div className="assessment-head"><div><b>Kho đề của tôi</b><small>Quản lý bản nháp, xuất bản trực tuyến và kết quả học sinh</small></div><button onClick={() => setCreating(true)}>＋ Tạo đề</button></div>
     <div className="assessment-grid">{assessments.map((item) => {
@@ -422,7 +526,10 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
       <div className="creation-mode"><button className={mode === "manual" ? "active" : ""} onClick={() => setMode("manual")}><span>W</span><b>Nhập đề từ Word</b><small>Tải mẫu đúng môn rồi đưa đề lên</small></button><button className={mode === "ai" ? "active ai" : "ai"} onClick={() => setMode("ai")}><span>✦</span><b>Tạo tự động bằng AI</b><small>Dán ngữ liệu bài học + số câu từng dạng</small></button></div>
       <div className="template-preview"><div><b>{subject}</b><span>{template.time} phút · {template.label}</span></div>{template.parts.map((part, index) => <p key={part}><i>{index + 1}</i>{part}</p>)}</div>
       <section className="exam-layout-config"><div className="exam-layout-head"><div><b>Tiêu đề và chân trang theo mẫu Word</b><small>Áp dụng cho mẫu tải về và các mã đề Word được sinh ra.</small></div><button onClick={downloadTemplate}>⇩ Tải mẫu có tiêu đề</button></div><div className="exam-layout-grid"><label>Sở / đơn vị quản lý<input value={examHeader.authority} onChange={(event) => setExamHeader({ ...examHeader, authority: event.target.value })} /></label><label>Tên trường / trung tâm<input value={examHeader.school} onChange={(event) => setExamHeader({ ...examHeader, school: event.target.value })} /></label><label>Tên kỳ kiểm tra<input value={examHeader.examName} onChange={(event) => setExamHeader({ ...examHeader, examName: event.target.value })} /></label><label>Năm học<input value={examHeader.schoolYear} onChange={(event) => setExamHeader({ ...examHeader, schoolYear: event.target.value })} /></label><label>Thời gian làm bài (phút)<input type="number" min="5" max="300" value={examHeader.duration} onChange={(event) => setExamHeader({ ...examHeader, duration: Math.max(5, Number(event.target.value)) })} /></label><label>Số trang dự kiến<input type="number" min="1" max="99" value={examHeader.pageCount} onChange={(event) => setExamHeader({ ...examHeader, pageCount: Math.max(1, Number(event.target.value)) })} /></label></div><div className="exam-paper-preview"><div className="paper-heading"><section><b>{examHeader.authority}</b><strong>{examHeader.school}</strong><i>--------------------</i><em>(Đề thi có {String(examHeader.pageCount).padStart(2, "0")} trang)</em></section><section><b>{examHeader.examName}</b><strong>NĂM HỌC {examHeader.schoolYear}</strong><strong>MÔN: {subject.toUpperCase()}</strong><em>Thời gian làm bài: {examHeader.duration} PHÚT<br />(không kể thời gian phát đề)</em></section></div><div className="paper-student-line"><span>Họ và tên: ........................................</span><span>Số báo danh: ........</span><b>Mã đề {firstCode}</b></div><div className="paper-body-sample"><b>I. TRẮC NGHIỆM KHÁCH QUAN</b><span>Câu 1. Nội dung đề được nhập từ Word hoặc AI tạo...</span></div><footer><span>Mã đề {firstCode}</span><span>Trang 1/{examHeader.pageCount}</span></footer></div></section>
-      {mode === "manual" ? <div className="assessment-source-panel"><div className="source-panel-head"><div><b>Bước 1 · Tải mẫu Word đúng môn</b><small>Mẫu có sẵn từng dạng câu hỏi và quy ước nhận dạng đáp án.</small></div><button onClick={downloadTemplate}>⇩ Tải {template.file}</button></div><div className="word-answer-rules"><article><span>A</span><div><b>Đáp án đúng</b><small><u>Gạch chân</u> hoặc <em>tô màu đỏ</em> nội dung đáp án</small></div></article><article><span>#</span><div><b>Giữ nguyên vị trí</b><small>Đặt # trước phương án, ví dụ: #D. Cả ba ý trên</small></div></article><article><span>▤</span><div><b>Câu mẫu theo từng phần</b><small>Nhiều lựa chọn · Đúng/Sai · Trả lời ngắn · Tự luận</small></div></article></div><label className="assessment-drop"><input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(e) => setManualFile(e.target.files?.[0] || null)} /><span>W</span><div><b>Bước 2 · Đưa đề Word đã soạn lên</b><small>{manualFile ? `Đã chọn: ${manualFile.name}` : "Chỉ nhận .doc hoặc .docx · tối đa 25 MB"}</small></div><em>{manualFile ? "Đổi file" : "Chọn file"}</em></label><div className="import-checklist"><b>Lưu ý</b><span>✓ Tệp đề được lưu nguyên bản trên kho tệp để in ấn, phát đề</span><span>✓ Muốn học sinh làm trực tuyến và tự chấm: dùng chế độ Tạo tự động bằng AI</span></div></div> : <div className="assessment-source-panel ai-source">
+      {mode === "manual" ? <div className="assessment-source-panel"><div className="source-panel-head"><div><b>Đưa đề Word lên — không bắt buộc theo mẫu</b><small>Hệ thống tự nhận diện Câu 1., Câu 2..., phương án A/B/C/D, ý a/b/c/d, ĐÁP ÁN: ... Đáp án <u>gạch chân</u>/<em>tô đỏ</em> được bắt tự động.</small></div><button onClick={downloadTemplate}>⇩ Mẫu tham khảo {template.file}</button></div><label className="assessment-drop"><input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(e) => void importWord(e.target.files?.[0] || null)} /><span>W</span><div><b>Chọn tệp đề Word (.docx)</b><small>{manualFile ? `Đã chọn: ${manualFile.name}` : "Ưu tiên .docx để nhận diện câu hỏi · tối đa 25 MB"}</small></div><em>{manualFile ? "Đổi file" : "Chọn file"}</em></label>
+        {importNote && <div className="import-note">{importNote}</div>}
+        {importedQuestions && <QuestionBankEditor questions={importedQuestions} onChange={setImportedQuestions} />}
+        <div className="import-checklist"><b>Lưu ý</b><span>✓ Tệp đề luôn được lưu nguyên bản trên kho tệp để in ấn, phát đề</span><span>✓ Khi đã duyệt đủ đáp án, đề có thể Xuất bản cho học sinh làm trực tuyến và tự chấm</span></div></div> : <div className="assessment-source-panel ai-source">
         <label className="ai-content-input">1. Dán ngữ liệu bài học / chủ đề <small>(bắt buộc · AI chỉ hỏi trong phạm vi nội dung này)</small><textarea rows={7} value={aiContent} onChange={(event) => setAiContent(event.target.value)} placeholder="Dán nội dung SGK, đề cương ôn tập, tóm tắt chủ đề..." /></label>
         <label className="ai-content-input">2. Yêu cầu ma trận / mức độ <small>(tùy chọn)</small><textarea rows={3} value={aiMatrixNote} onChange={(event) => setAiMatrixNote(event.target.value)} placeholder="Ví dụ: 40% nhận biết, 30% thông hiểu, 30% vận dụng; ưu tiên chương II..." /></label>
         <div className="question-config-head"><div><b>3. Cấu hình số câu theo từng dạng</b><small>AI phân bổ nội dung theo ngữ liệu và mức độ yêu cầu.</small></div><strong>{totalQuestions} câu</strong></div>
@@ -430,10 +537,91 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
         <button className="ai-generate" disabled={busy} onClick={() => void generateAi()}>{busy ? "AI đang tạo câu hỏi..." : "✦ Tạo câu hỏi bằng AI"}</button>
         {aiQuestions.length > 0 && <div className="ai-question-preview"><b>Đã tạo {aiQuestions.length} câu · duyệt nhanh</b>{aiQuestions.slice(0, 50).map((question, index) => <p key={question.id}><i>{index + 1}</i><span>[{typeNames[question.type]} · {question.level} · {question.points}đ]</span> {question.question}</p>)}</div>}
       </div>}
-      <section className="variant-config"><div className="variant-config-head"><div><b>Cấu hình sinh mã đề Word</b><small>Mã đề được đánh liên tục từ mã đầu tiên; mỗi đề kèm đáp án và chân trang riêng.</small></div><strong>{variantCount} đề · {variantCodes[0]}{variantCodes.length > 1 ? `–${variantCodes.at(-1)}` : ""}</strong></div><div className="variant-number-grid"><label>Số đề cần sinh<input type="number" min="1" max="50" value={variantCount} onChange={(event) => setVariantCount(Math.min(50, Math.max(1, Number(event.target.value))))} /></label><label>Mã đề bắt đầu<input type="number" min="1" max="9999" value={firstCode} onChange={(event) => setFirstCode(Math.max(1, Number(event.target.value)))} /></label><div><small>Các mã sẽ tạo</small><p>{variantCodes.slice(0, 12).map((code) => <span key={code}>{code}</span>)}{variantCodes.length > 12 && <i>+{variantCodes.length - 12}</i>}</p></div></div>{mode === "manual" && <div className="variant-mode"><button className={variantMode === "shuffle" ? "active" : ""} onClick={() => setVariantMode("shuffle")}><span>⇄</span><b>Đảo từ đề mẫu</b><small>Giữ nguyên câu hỏi, tạo mã đề bằng cách đổi thứ tự câu và/hoặc phương án.</small></button><button className={variantMode === "similar" ? "active ai" : "ai"} onClick={() => setVariantMode("similar")}><span>✦</span><b>AI sinh đề tương tự</b><small>Chỉ khả dụng với đề tạo bằng AI vì hệ thống chưa đọc được tệp Word.</small></button></div>}<div className="shuffle-options"><label><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /> Đảo thứ tự câu hỏi trong từng phần</label><label><input type="checkbox" checked={shuffleAnswers} onChange={(event) => setShuffleAnswers(event.target.checked)} /> Đảo vị trí đáp án A/B/C/D</label><span>Mỗi mã đề dùng một thứ tự trộn cố định, tái lập được khi tải lại.</span></div></section>
+      {activeBank.length > 0 && <section className="type-points-config">
+        <div className="online-config-head"><div><b>Cấu hình điểm theo dạng câu hỏi</b><small>Điểm mỗi câu áp cho từng dạng · tổng toàn đề hiện tại: <strong>{bankTotal} điểm</strong></small></div></div>
+        <div className="type-points-grid">
+          {countLabels.map(([key, label]) => {
+            const count = activeBank.filter((question) => typeKeyOf(question.type) === key).length;
+            return <label key={key}><b>{label}</b><input type="number" min="0.05" step="0.05" value={typePoints[key]} onChange={(event) => setTypePoints({ ...typePoints, [key]: Math.max(0.05, Number(event.target.value) || 0.05) })} /><small>điểm/câu · {count} câu</small></label>;
+          })}
+        </div>
+        <div className="type-points-actions">
+          <button onClick={applyTypePoints}>Áp dụng cho tất cả câu</button>
+          <button onClick={normalizeToTen}>Chuẩn hóa tổng về thang 10</button>
+          <small>Sau khi áp dụng vẫn có thể tinh chỉnh điểm từng câu trong phần duyệt câu hỏi.</small>
+        </div>
+      </section>}
+      <section className="online-config"><div className="online-config-head"><div><b>Cấu hình làm bài trực tuyến</b><small>Áp dụng khi đề được Xuất bản cho học sinh · thời gian làm dùng ô &quot;Thời gian làm bài&quot; phía trên ({examHeader.duration} phút)</small></div></div>
+        <div className="online-config-grid">
+          <label>Số lần được làm<select value={attempts === null ? "default" : String(attempts)} onChange={(e) => setAttempts(e.target.value === "default" ? null : Number(e.target.value))}><option value="default">Mặc định ({kind === "Luyện tập" ? "không giới hạn" : "1 lần"})</option><option value="1">1 lần</option><option value="2">2 lần</option><option value="3">3 lần</option><option value="5">5 lần</option><option value="0">Không giới hạn</option></select></label>
+          <label className="check"><input type="checkbox" checked={shuffleOnline} onChange={(e) => setShuffleOnline(e.target.checked)} /> Tự tạo mã đề riêng từng học sinh: xáo câu hỏi và đáp án trong phạm vi từng dạng (trắc nghiệm, đúng/sai, trả lời ngắn); câu tự luận giữ nguyên</label>
+          <label className="check"><input type="checkbox" checked={antiCheat} onChange={(e) => setAntiCheat(e.target.checked)} /> Chống gian lận: bắt buộc toàn màn hình khi làm, chặn sao chép/dán, ghi nhận số lần thoát/rời màn hình cho giáo viên</label>
+        </div>
+      </section>
+      <section className="variant-config"><div className="variant-config-head"><div><b>Cấu hình sinh mã đề Word</b><small>Mã đề được đánh liên tục từ mã đầu tiên; mỗi đề kèm đáp án và chân trang riêng.</small></div><strong>{variantCount} đề · {variantCodes[0]}{variantCodes.length > 1 ? `–${variantCodes.at(-1)}` : ""}</strong></div><div className="variant-number-grid"><label>Số đề cần sinh<input type="number" min="1" max="50" value={variantCount} onChange={(event) => setVariantCount(Math.min(50, Math.max(1, Number(event.target.value))))} /></label><label>Mã đề bắt đầu<input type="number" min="1" max="9999" value={firstCode} onChange={(event) => setFirstCode(Math.max(1, Number(event.target.value)))} /></label><div><small>Các mã sẽ tạo</small><p>{variantCodes.slice(0, 12).map((code) => <span key={code}>{code}</span>)}{variantCodes.length > 12 && <i>+{variantCodes.length - 12}</i>}</p></div></div><div className="shuffle-options"><label><input type="checkbox" checked={shuffleQuestions} onChange={(event) => setShuffleQuestions(event.target.checked)} /> Đảo thứ tự câu hỏi trong từng phần</label><label><input type="checkbox" checked={shuffleAnswers} onChange={(event) => setShuffleAnswers(event.target.checked)} /> Đảo vị trí đáp án A/B/C/D</label><span>Mỗi mã đề dùng một thứ tự trộn cố định, tái lập được khi tải lại.</span></div></section>
       <div className="assessment-options"><label><input type="checkbox" checked={includeAnswerKey} onChange={(event) => setIncludeAnswerKey(event.target.checked)} /> Tạo đáp án, hướng dẫn chấm</label></div><button className="assessment-create" disabled={busy} onClick={() => void create()}>{busy ? "Đang xử lý..." : mode === "ai" ? "Lưu đề với ngân hàng câu hỏi" : `Lưu đề Word (${variantCount} mã đề cấu hình sẵn)`}</button>
     </div></div>}
   </section>;
+}
+
+// Trình duyệt và biên tập ngân hàng câu hỏi (từ tệp Word nhận diện hoặc AI).
+function QuestionBankEditor({ questions, onChange }: { questions: ExamQuestion[]; onChange: (questions: ExamQuestion[]) => void }) {
+  const update = (id: string, changes: Partial<ExamQuestion>) => onChange(questions.map((question) => question.id === id ? { ...question, ...changes } : question));
+  const remove = (id: string) => onChange(questions.filter((question) => question.id !== id));
+  const changeType = (question: ExamQuestion, type: ExamQuestion["type"]) => {
+    if (type === question.type) return;
+    const base: Partial<ExamQuestion> = { type, answer: undefined, statements: undefined, options: undefined };
+    if (type === "choice") base.options = question.options?.length ? question.options : ["", "", "", ""];
+    if (type === "true_false") base.statements = question.statements?.length ? question.statements : [{ text: "" }, { text: "" }, { text: "" }, { text: "" }];
+    if (type === "short" || type === "essay") base.answer = "";
+    update(question.id, base);
+  };
+  const addQuestion = (type: ExamQuestion["type"]) =>
+    onChange([...questions, {
+      id: `q-${Date.now().toString(36)}-${questions.length + 1}`, type, level: "Thông hiểu", question: "",
+      points: type === "true_false" ? 1 : type === "essay" ? 1 : type === "short" ? 0.5 : 0.25,
+      ...(type === "choice" ? { options: ["", "", "", ""] } : {}),
+      ...(type === "true_false" ? { statements: [{ text: "" }, { text: "" }, { text: "" }, { text: "" }] } : {}),
+      ...(type === "short" || type === "essay" ? { answer: "" } : {}),
+    } as ExamQuestion]);
+  const totalPoints = Math.round(questions.reduce((sum, question) => sum + question.points, 0) * 100) / 100;
+  return <div className="question-bank-editor">
+    <div className="qbe-head"><b>Duyệt câu hỏi và chọn đáp án</b><span>{questions.length} câu · tổng {totalPoints} điểm</span></div>
+    {questions.map((question, index) => <article key={question.id}>
+      <header>
+        <span>Câu {index + 1}</span>
+        <select value={question.type} onChange={(event) => changeType(question, event.target.value as ExamQuestion["type"])} aria-label="Dạng câu hỏi">
+          <option value="choice">Trắc nghiệm</option><option value="true_false">Đúng/Sai</option><option value="short">Trả lời ngắn</option><option value="essay">Tự luận</option>
+        </select>
+        <select value={question.level} onChange={(event) => update(question.id, { level: event.target.value })} aria-label="Mức độ">
+          <option>Nhận biết</option><option>Thông hiểu</option><option>Vận dụng</option>
+        </select>
+        <label>Điểm<input type="number" min="0.1" step="0.25" value={question.points} onChange={(event) => update(question.id, { points: Math.max(0.1, Number(event.target.value) || 0.25) })} /></label>
+        <button className="qbe-remove" onClick={() => remove(question.id)} aria-label={`Xóa câu ${index + 1}`}>×</button>
+      </header>
+      <textarea rows={2} value={question.question} onChange={(event) => update(question.id, { question: event.target.value })} placeholder="Nội dung câu hỏi..." />
+      {question.type === "choice" && <div className="qbe-options">
+        {(question.options || []).map((option, optionIndex) => <div key={optionIndex}>
+          <button className={question.answer === optionIndex ? "correct" : ""} onClick={() => update(question.id, { answer: optionIndex })} title="Chọn làm đáp án đúng">{String.fromCharCode(65 + optionIndex)}</button>
+          <input value={option} onChange={(event) => update(question.id, { options: (question.options || []).map((item, i) => i === optionIndex ? event.target.value : item) })} placeholder={`Phương án ${String.fromCharCode(65 + optionIndex)}`} />
+          <button className="qbe-remove" onClick={() => update(question.id, { options: (question.options || []).filter((_, i) => i !== optionIndex), answer: question.answer === optionIndex ? undefined : typeof question.answer === "number" && question.answer > optionIndex ? question.answer - 1 : question.answer })} aria-label="Xóa phương án">×</button>
+        </div>)}
+        <div className="qbe-row-actions"><button onClick={() => update(question.id, { options: [...(question.options || []), ""] })}>＋ Thêm phương án</button><small>{question.answer === undefined ? "⚠ Bấm vào chữ cái để chọn đáp án đúng" : `Đáp án: ${String.fromCharCode(65 + Number(question.answer))}`}</small></div>
+      </div>}
+      {question.type === "true_false" && <div className="qbe-statements">
+        {(question.statements || []).map((statement, statementIndex) => <div key={statementIndex}>
+          <b>{String.fromCharCode(97 + statementIndex)})</b>
+          <input value={statement.text} onChange={(event) => update(question.id, { statements: (question.statements || []).map((item, i) => i === statementIndex ? { ...item, text: event.target.value } : item) })} placeholder="Nội dung nhận định..." />
+          <button className={statement.answer === true ? "selected" : ""} onClick={() => update(question.id, { statements: (question.statements || []).map((item, i) => i === statementIndex ? { ...item, answer: true } : item) })}>Đúng</button>
+          <button className={statement.answer === false ? "selected" : ""} onClick={() => update(question.id, { statements: (question.statements || []).map((item, i) => i === statementIndex ? { ...item, answer: false } : item) })}>Sai</button>
+        </div>)}
+        {(question.statements || []).some((statement) => statement.answer === undefined) && <small className="qbe-warning">⚠ Chọn Đúng/Sai cho từng ý</small>}
+      </div>}
+      {question.type === "short" && <label className="qbe-answer">Đáp án đúng <small>(nhiều đáp án chấp nhận cách nhau bằng dấu |)</small><input value={String(question.answer ?? "")} onChange={(event) => update(question.id, { answer: event.target.value })} placeholder="Ví dụ: 42 | bốn mươi hai" /></label>}
+      {question.type === "essay" && <label className="qbe-answer">Đáp án theo ý <small>(mỗi ý một dòng — hệ thống tự chấm theo ý khi làm trực tuyến; để trống nếu muốn giáo viên chấm tay)</small><textarea rows={3} value={String(question.answer ?? "")} onChange={(event) => update(question.id, { answer: event.target.value })} placeholder={"Ý 1: ...\nÝ 2: ..."} /></label>}
+    </article>)}
+    <div className="qbe-add"><b>Thêm câu mới:</b><button onClick={() => addQuestion("choice")}>＋ Trắc nghiệm</button><button onClick={() => addQuestion("true_false")}>＋ Đúng/Sai</button><button onClick={() => addQuestion("short")}>＋ Trả lời ngắn</button><button onClick={() => addQuestion("essay")}>＋ Tự luận</button></div>
+  </div>;
 }
 
 function ResultRow({ result, record, onOverride }: { result: AssessmentResult; record: AssessmentRecord; onOverride: (finalTen: number) => void }) {
@@ -448,7 +636,8 @@ function ResultRow({ result, record, onOverride }: { result: AssessmentResult; r
       <b>{result.studentName}</b>
       <span>{result.submittedAt ? new Date(result.submittedAt).toLocaleString("vi-VN") : ""}</span>
       <strong>{ten}/10</strong>
-      <em>{result.essayPending ? "Có tự luận chờ chấm" : "Đã chấm"}</em>
+      <em>{result.essayPending ? "Có tự luận chờ chấm" : "Đã chấm"}{result.attemptCount ? ` · lần làm thứ ${result.attemptCount}` : ""}</em>
+      {(result.violations || 0) > 0 && <i className="violation-badge" title={(result.violationEvents || []).map((event) => `${event.type} · ${new Date(event.at).toLocaleTimeString("vi-VN")}`).join("\n")}>⚠ {result.violations} lần rời màn hình</i>}
       {essays.length > 0 && <button onClick={() => setExpanded(!expanded)}>{expanded ? "Thu gọn" : "Xem bài tự luận"}</button>}
       <label className="score-override">
         <input value={override} onChange={(event) => setOverride(event.target.value)} placeholder="Điểm cuối /10" aria-label={`Điểm cuối của ${result.studentName}`} />
@@ -477,33 +666,69 @@ function StudentAssessments({ notify, accountKey }: { notify: Notice; accountKey
   }, [notify]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
 
-  if (taking) return <ExamRunner assessment={taking} notify={notify} onExit={() => { setTaking(null); void load(); }} />;
+  if (taking) {
+    const mine = results.find((result) => result.assessmentId === taking.id && result.studentKey === accountKey);
+    return <ExamRunner assessment={taking} notify={notify} accountKey={accountKey} attempt={(mine?.attemptCount || (mine ? 1 : 0)) + 1} onExit={() => { setTaking(null); void load(); }} />;
+  }
 
   return <section className="assessment-shell">
     <div className="assessment-hero student"><div><small>PHÒNG LUYỆN TẬP & KIỂM TRA</small><h2>Làm bài đúng cấu trúc, xem kết quả rõ ràng</h2><p>Chỉ đề giáo viên đã xuất bản mới hiển thị. Hệ thống tự chấm phần trắc nghiệm ngay khi nộp.</p></div><span>✓</span></div>
     {loading ? <div className="learning-empty">Đang tải danh sách đề...</div> : assessments.length === 0 ? <div className="learning-empty"><span>✓</span><b>Chưa có đề đã xuất bản</b><p>Đề sẽ xuất hiện khi giáo viên xuất bản bài luyện tập hoặc kiểm tra.</p></div> : <div className="assessment-grid">{assessments.map((item) => {
       const mine = results.find((result) => result.assessmentId === item.id && result.studentKey === accountKey);
-      const retakeable = item.kind === "Luyện tập";
-      return <article key={item.id}><div><span>{item.kind}</span><i>{mine ? "Đã nộp" : "Chưa làm"}</i></div><small>{item.subject} · {item.questions?.length} câu</small><h3>{item.title}</h3><p>◷ {item.time} phút · Tự chấm trắc nghiệm</p>
+      const limit = allowedAttempts(item);
+      const used = mine?.attemptCount || (mine ? 1 : 0);
+      const canTake = !mine || limit === 0 || used < limit;
+      return <article key={item.id}><div><span>{item.kind}</span><i>{mine ? "Đã nộp" : "Chưa làm"}</i></div><small>{item.subject} · {item.questions?.length} câu</small><h3>{item.title}</h3><p>◷ {item.time} phút · {limit === 0 ? "Không giới hạn lần làm" : `Đã làm ${used}/${limit} lần`}{item.antiCheat ? " · 🔒 Giám sát" : ""}</p>
         {mine && <p className="my-exam-score">Điểm của em: <b>{mine.total ? Math.round((mine.score / mine.total) * 100) / 10 : mine.score}/10</b>{mine.essayPending ? " · tự luận chờ chấm" : ""}</p>}
-        <footer className="assessment-card-actions">{(!mine || retakeable) && <button className="publish" onClick={() => setTaking(item)}>{mine ? "Làm lại" : "Làm bài"}</button>}{mine && !retakeable && <em className="status ok">Đã hoàn thành</em>}</footer>
+        <footer className="assessment-card-actions">{canTake ? <button className="publish" onClick={() => setTaking(item)}>{mine ? "Làm lại" : "Làm bài"}</button> : <em className="status ok">Đã hết lượt làm</em>}</footer>
       </article>;
     })}</div>}
   </section>;
 }
 
-function ExamRunner({ assessment, notify, onExit }: { assessment: AssessmentRecord; notify: Notice; onExit: () => void }) {
-  const questions = useMemo(() => assessment.questions || [], [assessment]);
+function ExamRunner({ assessment, notify, accountKey, attempt, onExit }: { assessment: AssessmentRecord; notify: Notice; accountKey: string; attempt: number; onExit: () => void }) {
+  // Hạt giống theo học sinh + lần làm: mỗi em nhận một mã đề xáo riêng.
+  const seed = useMemo(() => {
+    let hash = 0;
+    for (const character of `${assessment.id}:${accountKey}:${attempt}`) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+    return hash || 1;
+  }, [assessment.id, accountKey, attempt]);
+  const questions = useMemo(() => {
+    const base = assessment.questions || [];
+    if (!assessment.shuffleOnline) return base;
+    const types: ExamQuestion["type"][] = ["choice", "true_false", "short", "essay"];
+    return types.flatMap((type, index) => seededShuffle(base.filter((question) => question.type === type), seed + index));
+  }, [assessment, seed]);
+  const optionOrder = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    questions.forEach((question, index) => {
+      if (question.type !== "choice") return;
+      const indices = (question.options || []).map((_, i) => i);
+      map[question.id] = assessment.shuffleOnline ? seededShuffle(indices, seed * 7 + index) : indices;
+    });
+    return map;
+  }, [questions, assessment.shuffleOnline, seed]);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [secondsLeft, setSecondsLeft] = useState(Math.max(1, assessment.time) * 60);
   const [submitting, setSubmitting] = useState(false);
   const [finished, setFinished] = useState<{ score: number; total: number; essayPending: boolean } | null>(null);
+  const [started, setStarted] = useState(!assessment.antiCheat);
+  const [violations, setViolations] = useState<Array<{ type: string; at: string }>>([]);
+  const [fullscreenLost, setFullscreenLost] = useState(false);
   const set = (id: string, value: unknown) => setAnswers((current) => ({ ...current, [id]: value }));
   const answered = questions.filter((question) => {
     const value = answers[question.id];
     if (question.type === "true_false") return Array.isArray(value) && (value as unknown[]).some((entry) => entry !== undefined);
     return value !== undefined && String(value).trim() !== "";
   }).length;
+  const enterFullscreen = () => document.documentElement.requestFullscreen?.().catch(() => undefined);
+  const start = () => { setStarted(true); void enterFullscreen(); };
+  const blockClipboard = (event: React.ClipboardEvent | React.MouseEvent) => {
+    if (!assessment.antiCheat || finished || !started) return;
+    event.preventDefault();
+    setViolations((current) => current.length >= 100 ? current : [...current, { type: "Cố sao chép/dán nội dung", at: new Date().toISOString() }]);
+    notify("Bài kiểm tra không cho phép sao chép hay dán nội dung", "error");
+  };
 
   const submit = useCallback(async (auto = false) => {
     if (finished || submitting) return;
@@ -513,21 +738,22 @@ function ExamRunner({ assessment, notify, onExit }: { assessment: AssessmentReco
       const response = await fetch("/api/workspace", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "submit_assessment", result: { assessmentId: assessment.id, answers, score: grade.score, total: grade.total, essayPending: grade.essayPending } }),
+        body: JSON.stringify({ action: "submit_assessment", result: { assessmentId: assessment.id, answers, score: grade.score, total: grade.total, essayPending: grade.essayPending, violations: violations.length, violationEvents: violations.slice(0, 50) } }),
       });
       const result = await response.json();
       if (!response.ok || !result.saved) throw new Error(result.error || "Máy chủ chưa xác nhận bài làm");
       setFinished(grade);
+      void document.exitFullscreen?.().catch(() => undefined);
       notify(auto ? "Hết giờ — bài làm đã được nộp tự động" : "Đã nộp bài và lưu kết quả");
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể nộp bài", "error");
     } finally { setSubmitting(false); }
-  }, [answers, assessment.id, finished, notify, questions, submitting]);
+  }, [answers, assessment.id, finished, notify, questions, submitting, violations]);
 
   const submitRef = useRef(submit);
   useEffect(() => { submitRef.current = submit; });
   useEffect(() => {
-    if (finished) return;
+    if (finished || !started) return;
     const timer = window.setInterval(() => {
       setSecondsLeft((current) => {
         if (current <= 1) {
@@ -539,26 +765,57 @@ function ExamRunner({ assessment, notify, onExit }: { assessment: AssessmentReco
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [finished]);
+  }, [finished, started]);
+  // Giám sát chống gian lận: ghi nhận chuyển tab, rời cửa sổ, thoát toàn màn hình.
+  useEffect(() => {
+    if (!assessment.antiCheat || !started || finished) return;
+    const log = (type: string) => setViolations((current) => current.length >= 100 ? current : [...current, { type, at: new Date().toISOString() }]);
+    const onVisibility = () => { if (document.hidden) log("Chuyển tab hoặc thu nhỏ trình duyệt"); };
+    const onBlur = () => log("Rời khỏi cửa sổ làm bài");
+    const onFullscreen = () => {
+      if (!document.fullscreenElement) { setFullscreenLost(true); log("Thoát chế độ toàn màn hình"); }
+      else setFullscreenLost(false);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", onBlur);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", onBlur);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+    };
+  }, [assessment.antiCheat, started, finished]);
 
   if (finished) {
     const ten = finished.total ? Math.round((finished.score / finished.total) * 100) / 10 : finished.score;
-    return <section className="exam-runner"><div className="exam-finished"><span>✓</span><small>ĐÃ NỘP BÀI</small><h2>{assessment.title}</h2><b>{ten}/10 điểm</b><p>{finished.essayPending ? "Phần trắc nghiệm đã chấm tự động; phần tự luận chờ giáo viên chấm." : "Toàn bộ bài đã được chấm tự động và lưu trên Supabase."}</p><button onClick={onExit}>← Về danh sách đề</button></div></section>;
+    return <section className="exam-runner"><div className="exam-finished"><span>✓</span><small>ĐÃ NỘP BÀI</small><h2>{assessment.title}</h2><b>{ten}/10 điểm</b><p>{finished.essayPending ? "Phần trắc nghiệm đã chấm tự động; phần tự luận chờ giáo viên chấm." : "Toàn bộ bài đã được chấm tự động và lưu trên Supabase."}{violations.length > 0 ? ` Hệ thống đã ghi nhận ${violations.length} lần rời màn hình trong khi làm.` : ""}</p><button onClick={onExit}>← Về danh sách đề</button></div></section>;
+  }
+  if (!started) {
+    return <section className="exam-runner"><div className="exam-start-gate"><span>🔒</span><small>BÀI KIỂM TRA CÓ GIÁM SÁT</small><h2>{assessment.title}</h2><p>{assessment.subject} · {questions.length} câu · {assessment.time} phút</p>
+      <ul>
+        <li>Bài làm mở ở chế độ <b>toàn màn hình</b>; thoát toàn màn hình, chuyển tab hoặc thu nhỏ trình duyệt đều được ghi nhận và báo cho giáo viên.</li>
+        <li><b>Không thể sao chép hay dán</b> nội dung trong lúc làm bài.</li>
+        <li>Hết giờ hệ thống <b>tự động nộp bài</b>; mỗi em nhận một mã đề xáo câu hỏi riêng.</li>
+      </ul>
+      <button className="publish" onClick={start}>Bắt đầu làm bài (toàn màn hình) →</button>
+      <button onClick={onExit}>← Quay lại</button>
+    </div></section>;
   }
   const minutes = Math.max(0, Math.floor(secondsLeft / 60));
   const seconds = Math.max(0, secondsLeft % 60);
-  return <section className="exam-runner">
-    <header><button onClick={onExit}>← Thoát</button><div><b>{assessment.title}</b><small>{assessment.subject} · {assessment.kind} · {questions.length} câu</small></div><div className={`exam-timer ${secondsLeft < 300 ? "warning" : ""}`}>◷ {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</div></header>
+  return <section className={`exam-runner ${assessment.antiCheat ? "guarded" : ""}`} onCopy={blockClipboard} onCut={blockClipboard} onPaste={blockClipboard} onContextMenu={blockClipboard}>
+    <header><button onClick={onExit}>← Thoát</button><div><b>{assessment.title}</b><small>{assessment.subject} · {assessment.kind} · {questions.length} câu{assessment.shuffleOnline ? " · Mã đề riêng của em" : ""}</small></div>{assessment.antiCheat && violations.length > 0 && <span className="violation-live">⚠ {violations.length}</span>}<div className={`exam-timer ${secondsLeft < 300 ? "warning" : ""}`}>◷ {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</div></header>
     <main>
       {questions.map((question, index) => <article className="exam-question" key={question.id}>
         <div className="exam-question-head"><span>Câu {index + 1}</span><small>{typeNames[question.type]} · {question.level} · {question.points} điểm</small></div>
         <p>{question.question}</p>
-        {question.type === "choice" && <div className="exam-options">{(question.options || []).map((option, optionIndex) => <button key={option} className={Number(answers[question.id]) === optionIndex && answers[question.id] !== undefined ? "selected" : ""} onClick={() => set(question.id, optionIndex)}><span>{String.fromCharCode(65 + optionIndex)}</span>{option}</button>)}</div>}
-        {question.type === "true_false" && <div className="exam-truefalse">{(question.statements || []).map((statement, statementIndex) => { const picks = Array.isArray(answers[question.id]) ? [...(answers[question.id] as unknown[])] : []; return <div key={statement.text}><b>{String.fromCharCode(97 + statementIndex)})</b><span>{statement.text}</span><div><button className={picks[statementIndex] === true ? "selected" : ""} onClick={() => { picks[statementIndex] = true; set(question.id, picks); }}>Đúng</button><button className={picks[statementIndex] === false ? "selected" : ""} onClick={() => { picks[statementIndex] = false; set(question.id, picks); }}>Sai</button></div></div>; })}</div>}
+        {question.type === "choice" && <div className="exam-options">{(optionOrder[question.id] || []).map((originalIndex, position) => <button key={originalIndex} className={Number(answers[question.id]) === originalIndex && answers[question.id] !== undefined ? "selected" : ""} onClick={() => set(question.id, originalIndex)}><span>{String.fromCharCode(65 + position)}</span>{question.options?.[originalIndex]}</button>)}</div>}
+        {question.type === "true_false" && <div className="exam-truefalse">{(question.statements || []).map((statement, statementIndex) => { const picks = Array.isArray(answers[question.id]) ? [...(answers[question.id] as unknown[])] : []; return <div key={statement.text || statementIndex}><b>{String.fromCharCode(97 + statementIndex)})</b><span>{statement.text}</span><div><button className={picks[statementIndex] === true ? "selected" : ""} onClick={() => { picks[statementIndex] = true; set(question.id, picks); }}>Đúng</button><button className={picks[statementIndex] === false ? "selected" : ""} onClick={() => { picks[statementIndex] = false; set(question.id, picks); }}>Sai</button></div></div>; })}</div>}
         {question.type === "short" && <input className="exam-short" value={String(answers[question.id] ?? "")} onChange={(event) => set(question.id, event.target.value)} placeholder="Nhập đáp án ngắn..." />}
-        {question.type === "essay" && <textarea className="exam-essay" rows={6} value={String(answers[question.id] ?? "")} onChange={(event) => set(question.id, event.target.value)} placeholder="Trình bày bài làm... (giáo viên sẽ chấm phần này)" />}
+        {question.type === "essay" && <textarea className="exam-essay" rows={6} value={String(answers[question.id] ?? "")} onChange={(event) => set(question.id, event.target.value)} placeholder="Trình bày bài làm..." />}
       </article>)}
     </main>
     <footer><span>Đã trả lời {answered}/{questions.length} câu</span><button className="publish" disabled={submitting} onClick={() => { if (answered < questions.length && !window.confirm("Em còn câu chưa trả lời. Nộp bài ngay?")) return; void submit(); }}>{submitting ? "Đang nộp..." : "Nộp bài"}</button></footer>
+    {assessment.antiCheat && fullscreenLost && <div className="fullscreen-gate"><div><span>⚠</span><b>Em đã thoát chế độ toàn màn hình</b><small>Lần rời màn hình này đã được ghi nhận và báo cho giáo viên. Hãy quay lại toàn màn hình để tiếp tục làm bài.</small><button onClick={() => { setFullscreenLost(false); void enterFullscreen(); }}>Quay lại toàn màn hình →</button></div></div>}
   </section>;
 }
