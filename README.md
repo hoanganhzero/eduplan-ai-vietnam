@@ -1,3 +1,24 @@
+# EduPlan AI
+
+Nền tảng dạy và học số cho Trung tâm GDNN-GDTX khu vực Tân Ninh, chạy trên
+vinext (Cloudflare Workers) với dữ liệu trên Supabase và kho tệp R2.
+
+## Cấu hình EduPlan AI
+
+Biến môi trường (xem `.env.example`): `SUPABASE_URL`,
+`SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_APP_SECRET` (bắt buộc), `KIRA_API_KEY`
+(AI soạn giảng, sinh đề, giọng đọc), `GAMMA_API_KEY` (xuất slide),
+`ZALO_ACCESS_TOKEN` (gửi thông báo Zalo OA — tùy chọn).
+
+Sau khi kéo mã nguồn mới, chạy toàn bộ tệp trong `supabase/migrations/` theo
+thứ tự tên tệp trên SQL Editor của Supabase. Bản cập nhật gần nhất
+(`20260823_extend_workspace_actions.sql`) bổ sung các thao tác: học sinh tham
+gia lớp bằng mã, nhắn tin phụ huynh–giáo viên, đánh dấu đã đọc thông báo và
+nộp bài kiểm tra trực tuyến — thiếu migration này các chức năng đó sẽ báo lỗi
+"Thao tác dữ liệu không được hỗ trợ".
+
+---
+
 # vinext-starter
 
 A clean full-stack starter running on

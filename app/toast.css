@@ -1,0 +1,3 @@
+/* Toast báo lỗi: tách khỏi toast thành công để người dùng nhận biết ngay */
+.toast.error{background:#7f2315}
+.toast.error>span{background:#ef6f48}

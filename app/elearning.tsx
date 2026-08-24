@@ -25,8 +25,8 @@ function parsedResults(lesson: VideoLesson, answers: Record<string, string>) {
 }
 function scoreOf(lesson: VideoLesson, answers: Record<string, string>) { const rows = parsedResults(lesson, answers); const total = rows.reduce((sum, row) => sum + row.total, 0); const earned = rows.reduce((sum, row) => sum + row.earned, 0); return { earned, total, percent: total ? Math.round(earned * 100 / total) : 100, ten: total ? Math.round(earned * 100 / total) / 10 : 10 }; }
 
-export function ELearningModule({ role, notify }: { role: "teacher" | "student" | "admin"; notify: Notice }) {
-  return role === "student" ? <StudentVideoLibrary notify={notify} /> : <TeacherVideoStudio notify={notify} />;
+export function ELearningModule({ role, notify, myClassNames = [], allClassNames = [] }: { role: "teacher" | "student" | "admin"; notify: Notice; myClassNames?: string[]; allClassNames?: string[] }) {
+  return role === "student" ? <StudentVideoLibrary notify={notify} myClassNames={myClassNames} allClassNames={allClassNames} /> : <TeacherVideoStudio notify={notify} />;
 }
 
 function TeacherVideoStudio({ notify }: { notify: Notice }) {
@@ -60,9 +60,16 @@ function VideoLessonBuilder({ lesson, onChange, onExit, onPreview, onSaved, noti
   </section>;
 }
 
-function StudentVideoLibrary({ notify }: { notify: Notice }) {
+function StudentVideoLibrary({ notify, myClassNames, allClassNames }: { notify: Notice; myClassNames: string[]; allClassNames: string[] }) {
   const [lessons, setLessons] = useState<VideoLesson[]>([]); const [selected, setSelected] = useState<VideoLesson | null>(null); const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => { try { const result = await api<{ lessons: VideoLesson[] }>("/api/elearning"); setLessons((result.lessons || []).map(normalize).filter((lesson) => lesson.deliveryMode === "home")); } catch (error) { notify(error instanceof Error ? error.message : "Không thể tải bài học"); } finally { setLoading(false); } }, [notify]);
+  // Chỉ ẩn bài khi lớp được giao trùng với một lớp có thật mà em không tham gia;
+  // bài giao cho lớp không có trong danh sách (dữ liệu cũ, giao chung) vẫn hiển thị.
+  const visibleToMe = useCallback((lesson: VideoLesson) => {
+    const assigned = (lesson.className || "").trim();
+    if (!assigned || !allClassNames.includes(assigned)) return true;
+    return myClassNames.includes(assigned);
+  }, [myClassNames, allClassNames]);
+  const load = useCallback(async () => { try { const result = await api<{ lessons: VideoLesson[] }>("/api/elearning"); setLessons((result.lessons || []).map(normalize).filter((lesson) => lesson.deliveryMode === "home").filter(visibleToMe)); } catch (error) { notify(error instanceof Error ? error.message : "Không thể tải bài học"); } finally { setLoading(false); } }, [notify, visibleToMe]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
   const open = async (lesson: VideoLesson) => { try { const result = await api<{ lesson: VideoLesson }>(`/api/elearning?id=${encodeURIComponent(lesson.id || "")}`); setSelected(normalize(result.lesson)); } catch (error) { notify(error instanceof Error ? error.message : "Không thể mở bài học"); } };
   if (selected) return <VideoLearningPlayer lesson={selected} onExit={() => { setSelected(null); void load(); }} notify={notify} />;

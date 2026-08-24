@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 type ActivityType = "content" | "keywords" | "mindmap" | "multiple_choice" | "true_false" | "short_answer" | "ordering" | "matching";
-type Slide = { id: string; type: ActivityType; title: string; content: string; items?: string[]; answer?: string };
+type Slide = { id: string; type: ActivityType; title: string; content: string; items?: string[]; answer?: string; deliveryMode?: "classroom" | "home" };
 type Deck = { id?: string; title: string; subject: string; grade: string; className: string; summary: string; durationMinutes: number; deliveryMode: "classroom"; status: "draft" | "published"; coverColor: string; objectives: string[]; sections: Slide[]; updatedAt?: string };
 
 const labels: Record<ActivityType, { icon: string; label: string }> = {
@@ -18,8 +18,35 @@ async function request<T>(url: string, options?: RequestInit) {
   if (!response.ok) throw new Error(result.error || "Không thể xử lý bài trình chiếu"); return result;
 }
 
+type GammaJob = { title: string; status: "pending" | "completed" | "failed"; gammaUrl?: string; exportUrl?: string; detail?: string };
+
 export function ClassroomPresentationStudio({ notify }: { notify: (message: string) => void }) {
   const [decks, setDecks] = useState<Deck[]>([]); const [editing, setEditing] = useState<Deck | null>(null); const [presenting, setPresenting] = useState<Deck | null>(null); const [loading, setLoading] = useState(true);
+  const [gamma, setGamma] = useState<GammaJob | null>(null);
+  const exportToGamma = async (deck: Deck) => {
+    setGamma({ title: deck.title, status: "pending", detail: "Đang gửi nội dung sang Gamma..." });
+    try {
+      const lesson = {
+        title: deck.title, subject: deck.subject, grade: deck.grade, summary: deck.summary, objectives: deck.objectives,
+        sections: deck.sections.map((slide) => slide.type === "multiple_choice"
+          ? { title: slide.title, content: slide.content, type: "quiz", options: slide.items || [], correctAnswer: slide.answer || "" }
+          : { title: slide.title, content: `${slide.content}${slide.items?.length ? `\n${slide.items.map((item) => `• ${item}`).join("\n")}` : ""}` }),
+      };
+      const response = await request<{ generationId: string }>("/api/presentations/gamma", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "generate", lesson }) });
+      for (let attempt = 0; attempt < 36; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        const status = await request<{ status?: string; gammaUrl?: string; exportUrl?: string }>("/api/presentations/gamma", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "status", generationId: response.generationId }) });
+        if (status.status === "completed") { setGamma({ title: deck.title, status: "completed", gammaUrl: status.gammaUrl, exportUrl: status.exportUrl }); notify("Gamma đã tạo xong bài trình chiếu"); return; }
+        if (status.status === "failed") throw new Error("Gamma báo lỗi khi tạo trình chiếu. Vui lòng thử lại.");
+        setGamma({ title: deck.title, status: "pending", detail: `Gamma đang thiết kế slide... (${(attempt + 1) * 5}s)` });
+      }
+      throw new Error("Gamma xử lý quá lâu. Kiểm tra lại trong tài khoản Gamma của trung tâm.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không thể kết nối Gamma";
+      setGamma({ title: deck.title, status: "failed", detail: message });
+      notify(message);
+    }
+  };
   const load = useCallback(async () => { try { const result = await request<{ lessons: Deck[] }>("/api/elearning"); setDecks((result.lessons || []).map((item) => ({ ...item, deliveryMode: item.deliveryMode || item.sections?.[0]?.deliveryMode || "home" } as Deck)).filter((item) => item.deliveryMode === "classroom")); } catch (error) { notify(error instanceof Error ? error.message : "Không thể tải bài trình chiếu"); } finally { setLoading(false); } }, [notify]);
   useEffect(() => { queueMicrotask(() => void load()); }, [load]);
   if (presenting) return <WebDeck deck={presenting} onExit={() => setPresenting(null)} />;
@@ -28,7 +55,8 @@ export function ClassroomPresentationStudio({ notify }: { notify: (message: stri
     <div className="classroom-hero"><div><small>BÀI GIẢNG TRÌNH CHIẾU TRÊN LỚP</small><h2>Biến học liệu thành bài dạy web tương tác</h2><p>Tải slide, nội dung SGK và câu hỏi sẵn có. AI tổ chức thành nội dung giảng dạy, từ khóa, sơ đồ tư duy và hoạt động luyện tập để giáo viên điều khiển trực tiếp.</p><button onClick={() => setEditing(blank())}>＋ Tạo bài trình chiếu</button></div><div className="classroom-flow"><span><b>1</b>Tải học liệu</span><i>→</i><span><b>2</b>AI thiết kế</span><i>→</i><span><b>3</b>Dạy trên web</span></div></div>
     <div className="classroom-capabilities">{Object.entries(labels).map(([key, meta]) => <article key={key}><span>{meta.icon}</span><b>{meta.label}</b></article>)}</div>
     <div className="learning-section-head"><div><b>Kho bài giảng trên lớp</b><small>Tách riêng hoàn toàn với bài eLearning tự học ở nhà</small></div><button onClick={() => setEditing(blank())}>＋ Bài giảng mới</button></div>
-    {loading ? <div className="learning-empty">Đang tải bài trình chiếu...</div> : decks.length === 0 ? <div className="learning-empty"><span>▣</span><b>Chưa có bài giảng trên lớp</b><p>Tải học liệu để AI tạo bài trình chiếu web đầu tiên.</p></div> : <div className="classroom-deck-grid">{decks.map((deck) => <article key={deck.id}><div><small>{deck.subject} · Lớp {deck.grade}</small><b>{deck.sections.length}</b><span>trang web</span></div><section><i>{deck.status === "published" ? "Sẵn sàng dạy" : "Bản nháp"}</i><h3>{deck.title}</h3><p>{deck.summary}</p><footer><button onClick={() => setEditing(deck)}>Chỉnh sửa</button><button className="present" onClick={() => setPresenting(deck)}>▶ Trình chiếu</button></footer></section></article>)}</div>}
+    {gamma && <div className={`gamma-status ${gamma.status}`}><span>{gamma.status === "completed" ? "✓" : gamma.status === "failed" ? "!" : "◌"}</span><div><b>Xuất Gamma · {gamma.title}</b><small>{gamma.status === "completed" ? "Hoàn tất. Mở liên kết bên cạnh để xem hoặc tải PPTX." : gamma.detail}</small></div>{gamma.gammaUrl && <a href={gamma.gammaUrl} target="_blank" rel="noreferrer">Mở Gamma</a>}{gamma.exportUrl && <a href={gamma.exportUrl} target="_blank" rel="noreferrer">Tải PPTX</a>}<button onClick={() => setGamma(null)} aria-label="Đóng">×</button></div>}
+    {loading ? <div className="learning-empty">Đang tải bài trình chiếu...</div> : decks.length === 0 ? <div className="learning-empty"><span>▣</span><b>Chưa có bài giảng trên lớp</b><p>Tải học liệu để AI tạo bài trình chiếu web đầu tiên.</p></div> : <div className="classroom-deck-grid">{decks.map((deck) => <article key={deck.id}><div><small>{deck.subject} · Lớp {deck.grade}</small><b>{deck.sections.length}</b><span>trang web</span></div><section><i>{deck.status === "published" ? "Sẵn sàng dạy" : "Bản nháp"}</i><h3>{deck.title}</h3><p>{deck.summary}</p><footer><button onClick={() => setEditing(deck)}>Chỉnh sửa</button><button className="present" onClick={() => setPresenting(deck)}>▶ Trình chiếu</button><button onClick={() => void exportToGamma(deck)} disabled={gamma?.status === "pending"}>⇪ Xuất Gamma</button></footer></section></article>)}</div>}
   </section>;
 }
 
@@ -49,4 +77,16 @@ function ClassroomBuilder({ deck, onChange, onExit, onPresent, onSaved, notify }
 
 function UploadCard({ icon, title, note, file, accept, onFile }: { icon: string; title: string; note: string; file?: File; accept: string; onFile: (file?: File) => void }) { return <label><input type="file" accept={accept} onChange={(e) => onFile(e.target.files?.[0])} /><span>{icon}</span><div><b>{title}</b><small>{file ? file.name : note}</small></div><em>{file ? "Đổi tệp" : "Chọn tệp"}</em></label>; }
 
-function WebDeck({ deck, onExit }: { deck: Deck; onExit: () => void }) { const [current, setCurrent] = useState(0); const [reveal, setReveal] = useState(false); const slide = deck.sections[current]; if (!slide) return null; return <section className="web-deck"><header><button onClick={onExit}>← Thoát trình chiếu</button><div><b>{deck.title}</b><small>{deck.subject} · Lớp {deck.grade}</small></div><span>{current + 1}/{deck.sections.length}</span><button onClick={() => document.documentElement.requestFullscreen?.()}>⛶ Toàn màn hình</button></header><main><small>{labels[slide.type]?.label.toUpperCase()}</small><h1>{slide.title}</h1><p>{slide.content}</p>{slide.type === "keywords" && <div className="keyword-cloud">{(slide.items || []).map((item) => <b key={item}>{item}</b>)}</div>}{slide.type === "mindmap" && <div className="mindmap"><b>{slide.title}</b><section>{(slide.items || []).map((item) => <span key={item}>{item}</span>)}</section></div>}{new Set(["multiple_choice", "true_false", "short_answer", "ordering", "matching"]).has(slide.type) && <div className={`deck-activity ${slide.type}`}>{(slide.items || []).map((item, index) => <button key={item}><span>{String.fromCharCode(65 + index)}</span>{item}</button>)}<button className="reveal" onClick={() => setReveal(!reveal)}>{reveal ? `Đáp án: ${slide.answer || "Giáo viên chưa thiết lập"}` : "Hiện đáp án"}</button></div>}</main><footer><button disabled={current === 0} onClick={() => { setReveal(false); setCurrent(current - 1); }}>← Trang trước</button><div>{deck.sections.map((_, i) => <i key={i} className={i === current ? "active" : ""} />)}</div><button disabled={current === deck.sections.length - 1} onClick={() => { setReveal(false); setCurrent(current + 1); }}>Trang tiếp →</button></footer></section>; }
+function WebDeck({ deck, onExit }: { deck: Deck; onExit: () => void }) {
+  const [current, setCurrent] = useState(0); const [reveal, setReveal] = useState(false);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (event.key === " " && target?.tagName === "BUTTON") return;
+      if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") { event.preventDefault(); setReveal(false); setCurrent((value) => Math.min(deck.sections.length - 1, value + 1)); }
+      else if (event.key === "ArrowLeft" || event.key === "PageUp") { event.preventDefault(); setReveal(false); setCurrent((value) => Math.max(0, value - 1)); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deck.sections.length]);
+  const slide = deck.sections[current]; if (!slide) return null; return <section className="web-deck"><header><button onClick={onExit}>← Thoát trình chiếu</button><div><b>{deck.title}</b><small>{deck.subject} · Lớp {deck.grade}</small></div><span>{current + 1}/{deck.sections.length}</span><button onClick={() => document.documentElement.requestFullscreen?.()}>⛶ Toàn màn hình</button></header><main><small>{labels[slide.type]?.label.toUpperCase()}</small><h1>{slide.title}</h1><p>{slide.content}</p>{slide.type === "keywords" && <div className="keyword-cloud">{(slide.items || []).map((item) => <b key={item}>{item}</b>)}</div>}{slide.type === "mindmap" && <div className="mindmap"><b>{slide.title}</b><section>{(slide.items || []).map((item) => <span key={item}>{item}</span>)}</section></div>}{new Set(["multiple_choice", "true_false", "short_answer", "ordering", "matching"]).has(slide.type) && <div className={`deck-activity ${slide.type}`}>{(slide.items || []).map((item, index) => <button key={item}><span>{String.fromCharCode(65 + index)}</span>{item}</button>)}<button className="reveal" onClick={() => setReveal(!reveal)}>{reveal ? `Đáp án: ${slide.answer || "Giáo viên chưa thiết lập"}` : "Hiện đáp án"}</button></div>}</main><footer><button disabled={current === 0} onClick={() => { setReveal(false); setCurrent(current - 1); }}>← Trang trước</button><div>{deck.sections.map((_, i) => <i key={i} className={i === current ? "active" : ""} />)}</div><button disabled={current === deck.sections.length - 1} onClick={() => { setReveal(false); setCurrent(current + 1); }}>Trang tiếp →</button></footer></section>; }

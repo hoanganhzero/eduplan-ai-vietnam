@@ -25,12 +25,35 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const token = await tokenFor(request);
-    const payload = await request.json() as { action?: string; data?: unknown; submission?: unknown };
+    const payload = await request.json() as {
+      action?: string;
+      data?: unknown;
+      submission?: unknown;
+      code?: string;
+      toKey?: string;
+      body?: string;
+      result?: unknown;
+    };
     if (payload.action === "submit") {
       if (!payload.submission || typeof payload.submission !== "object") {
         return Response.json({ error: "Bài nộp không hợp lệ" }, { status: 400 });
       }
       return Response.json(await workspaceRpc("submit", { token, submission: payload.submission }));
+    }
+    if (payload.action === "join_class") {
+      return Response.json(await workspaceRpc("join_class", { token, code: String(payload.code || "") }));
+    }
+    if (payload.action === "send_message") {
+      return Response.json(await workspaceRpc("send_message", { token, toKey: String(payload.toKey || ""), body: String(payload.body || "") }));
+    }
+    if (payload.action === "read_notifications") {
+      return Response.json(await workspaceRpc("read_notifications", { token }));
+    }
+    if (payload.action === "submit_assessment") {
+      if (!payload.result || typeof payload.result !== "object") {
+        return Response.json({ error: "Bài làm không hợp lệ" }, { status: 400 });
+      }
+      return Response.json(await workspaceRpc("submit_assessment", { token, result: payload.result }));
     }
     if (!payload.data || typeof payload.data !== "object") {
       return Response.json({ error: "Dữ liệu không hợp lệ" }, { status: 400 });

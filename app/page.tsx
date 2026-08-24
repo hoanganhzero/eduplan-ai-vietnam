@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ELearningModule } from "./elearning";
 import { ClassroomPresentationStudio } from "./classroom-presentation";
 import { AssignmentComposer, type AssignmentAttachment } from "./assignment-composer";
 import { AssessmentStudio } from "./assessment-studio";
+import { LessonAiStudio } from "./lesson-studio";
 
 type Role = "admin" | "teacher" | "student" | "parent";
 type SessionAccount = {
@@ -31,14 +32,45 @@ type ManagedAccount = {
   updatedAt?: string;
 };
 type Modal =
-  | "lesson"
   | "assignment"
   | "class"
   | "submit"
-  | "message"
   | "register"
   | "process"
   | null;
+type ClassMember = { key: string; name: string; joinedAt?: string };
+type WorkspaceMessage = {
+  id: string;
+  fromKey: string;
+  fromName: string;
+  fromRole: string;
+  toKey: string;
+  toName: string;
+  body: string;
+  time: string;
+  readBy?: string[];
+};
+type AttendanceSession = {
+  id: string;
+  classId: number;
+  className: string;
+  date: string;
+  absentKeys: string[];
+  total: number;
+  takenBy?: string;
+};
+type ParentLink = { studentKey: string; studentName: string; parentName?: string };
+type AssessmentResult = {
+  id: string;
+  assessmentId: string;
+  studentKey: string;
+  studentName: string;
+  score: number;
+  total: number;
+  essayPending?: boolean;
+  submittedAt?: string;
+  answers?: Record<string, unknown>;
+};
 type User = {
   id: number;
   name: string;
@@ -68,6 +100,9 @@ type Workspace = {
     students: number;
     code: string;
     progress: number;
+    ownerKey?: string;
+    ownerName?: string;
+    members?: ClassMember[];
   }[];
   notifications: {
     id: number;
@@ -76,6 +111,8 @@ type Workspace = {
     audience: string;
     time: string;
     read: boolean;
+    senderName?: string;
+    readBy?: string[];
   }[];
   settings: {
     openai: boolean;
@@ -84,6 +121,7 @@ type Workspace = {
     maintenance: boolean;
   };
   assessments: Array<Record<string, unknown>>;
+  assessmentResults: AssessmentResult[];
   submissionRecords: {
     id: string;
     assignmentId: string;
@@ -96,6 +134,10 @@ type Workspace = {
     score?: string;
     feedback?: string;
   }[];
+  messages: WorkspaceMessage[];
+  attendanceSessions: AttendanceSession[];
+  parentLinks: Record<string, ParentLink>;
+  lessonPlans: Array<Record<string, unknown>>;
   submissions: number;
   attendance: number;
 };
@@ -106,6 +148,7 @@ const initialWorkspace: Workspace = {
   assignments: [],
   notifications: [],
   assessments: [],
+  assessmentResults: [],
   settings: {
     openai: false,
     zalo: false,
@@ -113,6 +156,10 @@ const initialWorkspace: Workspace = {
     maintenance: false,
   },
   submissionRecords: [],
+  messages: [],
+  attendanceSessions: [],
+  parentLinks: {},
+  lessonPlans: [],
   submissions: 0,
   attendance: 0,
 };
@@ -130,7 +177,12 @@ function normalizeWorkspace(value: unknown): Workspace {
     notifications: (source.notifications || []).filter((item) => !["Nhắc hạn nộp bài", "Kết quả học tập tuần 1", "Lịch họp chuyên môn"].includes(item.title)),
     settings: { ...initialWorkspace.settings, ...(source.settings || {}) },
     assessments: Array.isArray(source.assessments) ? source.assessments : [],
+    assessmentResults: Array.isArray(source.assessmentResults) ? source.assessmentResults : [],
     submissionRecords: records,
+    messages: Array.isArray(source.messages) ? source.messages : [],
+    attendanceSessions: Array.isArray(source.attendanceSessions) ? source.attendanceSessions : [],
+    parentLinks: source.parentLinks && typeof source.parentLinks === "object" ? source.parentLinks : {},
+    lessonPlans: Array.isArray(source.lessonPlans) ? source.lessonPlans : [],
     submissions: records.length,
     attendance: Number(source.attendance || 0),
   };
@@ -151,21 +203,21 @@ const roleMeta: Record<
     welcome: "Trung tâm điều hành",
     subtitle: "Giám sát người dùng, lớp học, nội dung và tích hợp hệ thống.",
     color: "#155eef",
-    menu: ["Tổng quan", "Người dùng", "Lớp học", "Nội dung", "Cấu hình"],
+    menu: ["Tổng quan", "Người dùng", "Lớp học", "Nội dung", "Thông báo", "Trao đổi", "Cấu hình"],
   },
   teacher: {
     label: "Giáo viên",
     welcome: "Chào thầy Hoàng Anh",
     subtitle: "Quản lý lớp, soạn giảng bằng AI, giao bài và đánh giá học sinh.",
     color: "#0891b2",
-    menu: ["Tổng quan", "Lớp của tôi", "eLearning tại nhà", "Trình chiếu trên lớp", "Luyện tập & kiểm tra", "AI soạn giảng", "Bài tập", "Chấm bài"],
+    menu: ["Tổng quan", "Lớp của tôi", "eLearning tại nhà", "Trình chiếu trên lớp", "Luyện tập & kiểm tra", "AI soạn giảng", "Bài tập", "Chấm bài", "Thông báo", "Trao đổi"],
   },
   student: {
     label: "Học sinh",
     welcome: "Chào Gia Huy",
     subtitle: "Học tập, nộp bài, xem phản hồi và theo dõi tiến độ cá nhân.",
     color: "#2563eb",
-    menu: ["Tổng quan", "Học trực tuyến", "Luyện tập & kiểm tra", "Lớp học", "Bài tập", "Học liệu", "Kết quả"],
+    menu: ["Tổng quan", "Học trực tuyến", "Luyện tập & kiểm tra", "Lớp học", "Bài tập", "Học liệu", "Kết quả", "Thông báo"],
   },
   parent: {
     label: "Phụ huynh",
@@ -188,7 +240,7 @@ export default function Home() {
   const [view, setView] = useState("Tổng quan");
   const [data, setData] = useState<Workspace>(initialWorkspace);
   const [modal, setModal] = useState<Modal>(null);
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -202,12 +254,18 @@ export default function Home() {
   const [editingAccount, setEditingAccount] = useState<ManagedAccount | null>(
     null,
   );
+  const [attendanceClass, setAttendanceClass] = useState<Workspace["classes"][number] | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [services, setServices] = useState<Record<string, boolean>>({});
-  const notify = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast(""), 2600);
+  const notify = useCallback((message: string, tone?: "success" | "error") => {
+    const resolved =
+      tone ??
+      (/^(Không thể|Chưa thể|Vui lòng|Hãy |Lỗi|Máy chủ|Mật khẩu|Ảnh đại diện)/.test(message)
+        ? "error"
+        : "success");
+    setToast({ message, tone: resolved });
+    window.setTimeout(() => setToast(null), resolved === "error" ? 3400 : 2600);
   }, []);
 
   useEffect(() => {
@@ -283,14 +341,15 @@ export default function Home() {
       session.account.status !== "active"
     )
       return;
+    const adminAccount = session.account;
     const demo = window.location.hostname === "terminal.local";
     if (demo) {
       queueMicrotask(() => setAccounts([
         {
-          accountKey: session.account.accountKey,
-          email: session.account.email,
-          username: session.account.username,
-          name: session.account.name,
+          accountKey: adminAccount.accountKey,
+          email: adminAccount.email,
+          username: adminAccount.username,
+          name: adminAccount.name,
           role: "admin",
           status: "active",
         },
@@ -351,46 +410,91 @@ export default function Home() {
       setSaving(false);
     }
   };
-  const metrics = useMemo(
-    () =>
-      role === "admin"
-        ? [
-            [
-              "Người dùng",
-              accounts.length,
-              `${accounts.filter((a) => a.status === "active").length} đang hoạt động`,
-            ],
-            ["Lớp đang hoạt động", data.classes.length, `${data.classes.reduce((sum, item) => sum + item.students, 0)} học sinh`],
-            ["Bài tập", data.assignments.length, "Đã lưu trên Supabase"],
-            ["Bài nộp", data.submissionRecords.length, "Dữ liệu thực"],
-          ]
-        : role === "teacher"
-          ? [
-              ["Lớp phụ trách", data.classes.length, `${data.classes.reduce((sum, item) => sum + item.students, 0)} học sinh`],
-              ["Bài cần chấm", data.submissionRecords.filter((item) => item.status === "Đã nộp").length, "Theo bài nộp thật"],
-              ["Bài tập đã giao", data.assignments.length, "Đồng bộ Supabase"],
-              ["Thông báo mới", data.notifications.filter((item) => !item.read).length, "Chưa đọc"],
-            ]
-          : role === "student"
-            ? [
-                ["Bài cần làm", data.assignments.length, "Được giáo viên giao"],
-                ["Bài đã nộp", data.submissionRecords.filter((item) => item.studentKey === session?.account?.accountKey).length, "Đã lưu"],
-                ["Lớp học", data.classes.length, "Đang hiển thị"],
-                ["Thông báo", data.notifications.filter((item) => !item.read).length, "Chưa đọc"],
-              ]
-            : [
-                ["Kết quả", "—", "Chưa liên kết học sinh"],
-                ["Chuyên cần", data.attendance ? `${data.attendance}%` : "—", data.attendance ? "Đã cập nhật" : "Chưa có dữ liệu"],
-                ["Bài đã nộp", data.submissionRecords.length, "Dữ liệu đã lưu"],
-                ["Thông báo", data.notifications.filter((item) => !item.read).length, "Chưa đọc"],
-              ],
-    [role, data, accounts],
-  );
   const filteredAccounts = accounts.filter((u) =>
     (u.name + (u.email || "") + (u.username || "") + roleMeta[u.role].label)
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
+  const me = session?.account?.accountKey || "";
+  const query = search.trim().toLowerCase();
+  const myClasses =
+    role === "student"
+      ? data.classes.filter((c) => c.members?.some((m) => m.key === me))
+      : data.classes;
+  const childLink = role === "parent" ? data.parentLinks[me] : undefined;
+  const childKey = childLink?.studentKey || "";
+  const childClasses = childKey
+    ? data.classes.filter((c) => c.members?.some((m) => m.key === childKey))
+    : [];
+  const scopeClassNames = new Set(myClasses.map((c) => c.name));
+  const scopedAssignments =
+    role === "student"
+      ? data.assignments.filter((a) => scopeClassNames.has(a.className) || a.className === "Chưa gán lớp")
+      : data.assignments;
+  const visibleClasses = query
+    ? myClasses.filter((c) => `${c.name} ${c.subject} ${c.code}`.toLowerCase().includes(query))
+    : myClasses;
+  const visibleAssignments = query
+    ? scopedAssignments.filter((a) => `${a.title} ${a.subject} ${a.className}`.toLowerCase().includes(query))
+    : scopedAssignments;
+  const mySubmissions = new Set(
+    data.submissionRecords
+      .filter((record) => record.studentKey === me)
+      .map((record) => record.assignmentId),
+  );
+  const visibleNotifications = data.notifications.filter((n) =>
+    role === "admin" || role === "teacher"
+      ? true
+      : role === "student"
+        ? !n.audience || n.audience === "Toàn trung tâm" || scopeClassNames.has(n.audience)
+        : !n.audience || n.audience === "Toàn trung tâm" || childClasses.some((c) => c.name === n.audience),
+  );
+  const unreadNotifications = visibleNotifications.filter(
+    (n) => !n.read && !(n.readBy || []).includes(me),
+  ).length;
+  const childRecords = data.submissionRecords.filter((record) => record.studentKey === childKey);
+  const childGraded = childRecords.filter((record) => record.score !== undefined && record.score !== "");
+  const childExamResults = data.assessmentResults.filter((result) => result.studentKey === childKey);
+  const childSessions = data.attendanceSessions.filter((s) => childClasses.some((c) => c.id === s.classId));
+  const childAbsent = childSessions.filter((s) => s.absentKeys.includes(childKey)).length;
+  const attendancePercent = childSessions.length
+    ? Math.round(((childSessions.length - childAbsent) / childSessions.length) * 100)
+    : null;
+  const childAverage = (() => {
+    const scores = [
+      ...childGraded.map((record) => Number(String(record.score).replace(",", "."))).filter(Number.isFinite),
+      ...childExamResults.map((result) => (result.total ? (result.score / result.total) * 10 : NaN)).filter(Number.isFinite),
+    ];
+    return scores.length ? Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 10) / 10 : null;
+  })();
+  const metrics: (string | number)[][] =
+    role === "admin"
+      ? [
+          ["Người dùng", accounts.length, `${accounts.filter((a) => a.status === "active").length} đang hoạt động`],
+          ["Lớp đang hoạt động", data.classes.length, `${data.classes.reduce((sum, item) => sum + item.students, 0)} học sinh`],
+          ["Bài tập", data.assignments.length, "Đã lưu trên Supabase"],
+          ["Bài nộp", data.submissionRecords.length, "Dữ liệu thực"],
+        ]
+      : role === "teacher"
+        ? [
+            ["Lớp phụ trách", data.classes.length, `${data.classes.reduce((sum, item) => sum + item.students, 0)} học sinh`],
+            ["Bài cần chấm", data.submissionRecords.filter((item) => item.status === "Đã nộp").length, "Theo bài nộp thật"],
+            ["Bài tập đã giao", data.assignments.length, "Đồng bộ Supabase"],
+            ["Thông báo mới", unreadNotifications, "Chưa đọc"],
+          ]
+        : role === "student"
+          ? [
+              ["Bài cần làm", scopedAssignments.filter((item) => !mySubmissions.has(String(item.id))).length, "Chưa nộp bài"],
+              ["Bài đã nộp", mySubmissions.size, "Đã lưu"],
+              ["Lớp đã tham gia", myClasses.length, myClasses.length ? "Theo mã lớp" : "Nhập mã để tham gia"],
+              ["Thông báo", unreadNotifications, "Chưa đọc"],
+            ]
+          : [
+              ["Điểm TB của con", childAverage ?? "—", childLink ? `${childGraded.length + childExamResults.length} bài đã chấm` : "Chưa liên kết học sinh"],
+              ["Chuyên cần", attendancePercent !== null ? `${attendancePercent}%` : "—", childSessions.length ? `${childSessions.length} buổi điểm danh` : "Chưa có dữ liệu"],
+              ["Bài đã nộp", childKey ? childRecords.length : "—", childLink ? `Của ${childLink.studentName}` : "Chưa liên kết"],
+              ["Thông báo", unreadNotifications, "Chưa đọc"],
+            ];
 
   const saveAccount = async (account: ManagedAccount) => {
     if (window.location.hostname === "terminal.local") {
@@ -499,6 +603,118 @@ export default function Home() {
       { ...data, settings: { ...data.settings, [key]: !data.settings[key] } },
       "Đã lưu cấu hình hệ thống",
     );
+  const workspaceAction = async (payload: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      const response = await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.saved) throw new Error(result.error || "Máy chủ chưa xác nhận thao tác");
+      setData(normalizeWorkspace(result.data));
+      return result;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Không thể thực hiện thao tác", "error");
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
+  const joinClass = async (code: string) => {
+    const result = await workspaceAction({ action: "join_class", code });
+    if (result) notify(result.alreadyJoined ? `Em đã ở trong lớp ${result.className}` : `Đã tham gia lớp ${result.className}`);
+    return Boolean(result);
+  };
+  const sendMessage = async (toKey: string, body: string) => {
+    const result = await workspaceAction({ action: "send_message", toKey, body });
+    if (result) notify("Đã gửi tin nhắn");
+    return Boolean(result);
+  };
+  const sendNotification = async (payload: { title: string; body: string; audience: string; zaloIds: string[] }) => {
+    const notification = {
+      id: Date.now(),
+      title: payload.title,
+      body: payload.body,
+      audience: payload.audience,
+      time: new Date().toLocaleString("vi-VN"),
+      read: false,
+      senderName: session?.account?.name,
+      readBy: [me],
+    };
+    const ok = await persist(
+      { ...data, notifications: [notification, ...data.notifications] },
+      "Đã gửi thông báo trong hệ thống",
+    );
+    if (ok && payload.zaloIds.length) {
+      try {
+        const response = await fetch("/api/zalo", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: payload.title, message: payload.body, userIds: payload.zaloIds }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error);
+        notify(`Đã gửi Zalo OA tới ${result.sent} người nhận`);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "Không thể gửi Zalo", "error");
+      }
+    }
+    return ok;
+  };
+  const linkParent = async (parent: ManagedAccount, studentKey: string) => {
+    const nextLinks = { ...data.parentLinks };
+    if (!studentKey) delete nextLinks[parent.accountKey];
+    else {
+      const student = accounts.find((a) => a.accountKey === studentKey);
+      nextLinks[parent.accountKey] = {
+        studentKey,
+        studentName: student?.name || "Học sinh",
+        parentName: parent.name,
+      };
+    }
+    await persist(
+      { ...data, parentLinks: nextLinks },
+      studentKey ? "Đã liên kết phụ huynh với học sinh" : "Đã hủy liên kết phụ huynh",
+    );
+  };
+  const contacts = (() => {
+    const map = new Map<string, { key: string; name: string; note: string }>();
+    if (role === "parent")
+      childClasses.forEach((c) => {
+        if (c.ownerKey && c.ownerKey !== me)
+          map.set(c.ownerKey, { key: c.ownerKey, name: c.ownerName || "Giáo viên", note: `GV lớp ${c.name}` });
+      });
+    if (role === "teacher" || role === "admin")
+      Object.entries(data.parentLinks).forEach(([parentKey, link]) => {
+        const related = data.classes.some(
+          (c) => (role === "admin" || c.ownerKey === me) && c.members?.some((m) => m.key === link.studentKey),
+        );
+        if (related && parentKey !== me)
+          map.set(parentKey, { key: parentKey, name: link.parentName || "Phụ huynh", note: `PH em ${link.studentName}` });
+      });
+    data.messages.forEach((m) => {
+      if (m.toKey === me && !map.has(m.fromKey))
+        map.set(m.fromKey, { key: m.fromKey, name: m.fromName, note: roleMeta[m.fromRole as Role]?.label || "" });
+      if (m.fromKey === me && !map.has(m.toKey)) map.set(m.toKey, { key: m.toKey, name: m.toName, note: "" });
+    });
+    return [...map.values()];
+  })();
+  useEffect(() => {
+    if (view !== "Thông báo" || unreadNotifications === 0) return;
+    if (window.location.hostname === "terminal.local") return;
+    fetch("/api/workspace", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "read_notifications" }),
+    })
+      .then((r) => r.json())
+      .then((result) => {
+        if (result.saved) setData(normalizeWorkspace(result.data));
+      })
+      .catch(() => undefined);
+  }, [view, unreadNotifications]);
 
   if (authLoading)
     return (
@@ -586,6 +802,7 @@ export default function Home() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Tìm kiếm trong không gian làm việc"
               placeholder="Tìm lớp học, người dùng, bài tập..."
             />
           </div>
@@ -595,12 +812,11 @@ export default function Home() {
           </div>
           <button
             className="bell"
-            onClick={() =>
-              setView(role === "parent" ? "Thông báo" : "Tổng quan")
-            }
-            aria-label="Thông báo"
+            onClick={() => setView("Thông báo")}
+            aria-label={unreadNotifications ? `Thông báo: ${unreadNotifications} chưa đọc` : "Thông báo"}
+            title={unreadNotifications ? `${unreadNotifications} thông báo chưa đọc` : "Thông báo"}
           >
-            ♢<i />
+            ♢{unreadNotifications > 0 && <i />}
           </button>
           <button
             className="profile"
@@ -634,7 +850,7 @@ export default function Home() {
           <div className={`page-head ${view === "Tổng quan" ? "overview-head" : ""}`}>
             <div>
               <span>EDUPLAN AI · {roleMeta[role].label.toUpperCase()}</span>
-              <h1>{view === "Tổng quan" ? `Chào buổi sáng, ${session.account.name}` : view}</h1>
+              <h1>{view === "Tổng quan" ? `${greeting()}, ${session.account.name}` : view}</h1>
               <p>
                 {view === "Tổng quan"
                   ? roleMeta[role].subtitle
@@ -645,17 +861,11 @@ export default function Home() {
               <button className="soft" onClick={() => setModal("process")}>
                 Xem quy trình
               </button>
-              {role === "teacher" && view !== "eLearning tại nhà" && view !== "Trình chiếu trên lớp" && view !== "Luyện tập & kiểm tra" && (
+              {role === "teacher" && ["Tổng quan", "Lớp của tôi", "Bài tập", "Chấm bài"].includes(view) && (
                 <button
                   className="primary"
                   onClick={() =>
-                    setModal(
-                      view === "Lớp của tôi"
-                        ? "class"
-                        : view === "Bài tập"
-                          ? "assignment"
-                          : "lesson",
-                    )
+                    view === "Lớp của tôi" ? setModal("class") : setModal("assignment")
                   }
                 >
                   ＋ Tạo mới
@@ -692,14 +902,12 @@ export default function Home() {
                   metrics={metrics}
                   onAction={(action) =>
                     action === "lesson"
-                      ? setModal("lesson")
+                      ? setView("AI soạn giảng")
                       : action === "assignment"
                         ? setModal("assignment")
                         : action === "submit"
                           ? setModal("submit")
-                          : action === "message"
-                            ? setModal("message")
-                            : setView(action)
+                          : setView(action)
                   }
                 />
               )}
@@ -713,12 +921,39 @@ export default function Home() {
               )}
               {role === "admin" && view === "Lớp học" && (
                 <ClassesGrid
-                  classes={data.classes}
+                  classes={visibleClasses}
                   admin
                 />
               )}
               {role === "admin" && view === "Nội dung" && (
                 <ContentModeration data={data} />
+              )}
+              {(role === "admin" || role === "teacher") && view === "Thông báo" && (
+                <NotificationCenter
+                  items={visibleNotifications}
+                  me={me}
+                  classes={data.classes}
+                  zaloConnected={Boolean(services.zalo)}
+                  onSend={sendNotification}
+                />
+              )}
+              {(role === "admin" || role === "teacher" || role === "parent") && view === "Trao đổi" && (
+                <MessagesPanel
+                  me={me}
+                  messages={data.messages}
+                  contacts={contacts}
+                  onSend={sendMessage}
+                  emptyNote={
+                    role === "parent"
+                      ? childLink
+                        ? "Chọn giáo viên phụ trách lớp của con để bắt đầu trao đổi."
+                        : "Kênh trao đổi sẽ mở sau khi Admin liên kết tài khoản với học sinh."
+                      : "Phụ huynh nhắn tin cho bạn sẽ xuất hiện tại đây; bạn cũng có thể chủ động nhắn cho phụ huynh đã liên kết."
+                  }
+                />
+              )}
+              {role === "student" && view === "Thông báo" && (
+                <NotificationList items={visibleNotifications} me={me} />
               )}
               {role === "admin" && view === "Cấu hình" && (
                 <Settings
@@ -729,10 +964,13 @@ export default function Home() {
               )}
               {role === "teacher" && view === "Lớp của tôi" && (
                 <ClassesGrid
-                  classes={data.classes}
+                  classes={visibleClasses}
+                  onAttendance={setAttendanceClass}
                 />
               )}
-              {(role === "teacher" || role === "student") && view === "Luyện tập & kiểm tra" && <AssessmentStudio role={role} notify={notify} />}
+              {(role === "teacher" || role === "student") && view === "Luyện tập & kiểm tra" && (
+                <AssessmentStudio role={role} notify={notify} accountKey={me} />
+              )}
               {role === "teacher" && view === "eLearning tại nhà" && (
                 <ELearningModule role="teacher" notify={notify} />
               )}
@@ -740,14 +978,23 @@ export default function Home() {
                 <ClassroomPresentationStudio notify={notify} />
               )}
               {role === "teacher" && view === "AI soạn giảng" && (
-                <AiStudio
-                  onCreate={() => setModal("lesson")}
-                  onAction={notify}
+                <LessonAiStudio
+                  notify={notify}
+                  plans={data.lessonPlans}
+                  onSavePlan={(plan) =>
+                    persist({ ...data, lessonPlans: [plan, ...data.lessonPlans] }, "Đã lưu bài dạy vào kho học liệu")
+                  }
+                  onDeletePlan={(id) =>
+                    persist(
+                      { ...data, lessonPlans: data.lessonPlans.filter((plan) => String(plan.id) !== id) },
+                      "Đã xóa bài dạy khỏi kho",
+                    )
+                  }
                 />
               )}
               {role === "teacher" && view === "Bài tập" && (
                 <Assignments
-                  data={data.assignments}
+                  data={visibleAssignments}
                   teacher
                   onCreate={() => setModal("assignment")}
                   onOpenSubmissions={() => setView("Chấm bài")}
@@ -761,34 +1008,70 @@ export default function Home() {
                 />
               )}
               {role === "student" && view === "Lớp học" && (
-                <ClassesGrid
-                  classes={data.classes.slice(0, 2)}
-                />
+                <>
+                  <JoinClassPanel onJoin={joinClass} busy={saving} />
+                  <ClassesGrid
+                    classes={visibleClasses}
+                    joinNote
+                  />
+                </>
               )}
               {role === "student" && view === "Học trực tuyến" && (
-                <ELearningModule role="student" notify={notify} />
+                <ELearningModule
+                  role="student"
+                  notify={notify}
+                  myClassNames={myClasses.map((c) => c.name)}
+                  allClassNames={data.classes.map((c) => c.name)}
+                />
               )}
               {role === "student" && view === "Bài tập" && (
                 <Assignments
-                  data={data.assignments}
+                  data={visibleAssignments}
+                  submittedIds={mySubmissions}
                   onCreate={() => setModal("submit")}
                 />
               )}
               {role === "student" && view === "Học liệu" && (
-                <LearningResources assignments={data.assignments} />
+                <LearningResources assignments={scopedAssignments} />
               )}
-              {role === "student" && view === "Kết quả" && <StudentResults records={data.submissionRecords.filter((item) => item.studentKey === session.account.accountKey)} assignments={data.assignments} />}
-              {role === "parent" && view === "Kết quả của con" && (
-                <EmptyData title="Chưa liên kết học sinh" note="Kết quả chỉ xuất hiện sau khi Admin liên kết tài khoản phụ huynh với học sinh." />
-              )}
-              {role === "parent" && view === "Chuyên cần" && <EmptyData title="Chưa có dữ liệu chuyên cần" note="Nhà trường chưa cập nhật dữ liệu điểm danh cho tài khoản này." />}
-              {role === "parent" && view === "Thông báo" && (
-                <NotificationList
-                  items={data.notifications}
+              {role === "student" && view === "Kết quả" && (
+                <StudentResults
+                  records={data.submissionRecords.filter((item) => item.studentKey === me)}
+                  assignments={data.assignments}
+                  examResults={data.assessmentResults.filter((result) => result.studentKey === me)}
+                  assessments={data.assessments}
                 />
               )}
-              {role === "parent" && view === "Trao đổi" && (
-                <EmptyData title="Chưa có cuộc trao đổi" note="Kênh trao đổi sẽ mở sau khi tài khoản được liên kết với học sinh và giáo viên phụ trách." />
+              {role === "parent" && view === "Kết quả của con" && (
+                childLink ? (
+                  <StudentResults
+                    records={childRecords}
+                    assignments={data.assignments}
+                    examResults={childExamResults}
+                    assessments={data.assessments}
+                    studentName={childLink.studentName}
+                  />
+                ) : (
+                  <EmptyData title="Chưa liên kết học sinh" note="Kết quả chỉ xuất hiện sau khi Admin liên kết tài khoản phụ huynh với học sinh." />
+                )
+              )}
+              {role === "parent" && view === "Chuyên cần" && (
+                childLink ? (
+                  <AttendanceOverview
+                    sessions={childSessions}
+                    childKey={childKey}
+                    childName={childLink.studentName}
+                    classes={childClasses}
+                  />
+                ) : (
+                  <EmptyData title="Chưa liên kết học sinh" note="Chuyên cần chỉ xuất hiện sau khi Admin liên kết tài khoản phụ huynh với học sinh." />
+                )
+              )}
+              {role === "parent" && view === "Thông báo" && (
+                <NotificationList
+                  items={visibleNotifications}
+                  me={me}
+                />
               )}
             </>
           )}
@@ -798,7 +1081,7 @@ export default function Home() {
         <ActionModal
           modal={modal}
           role={role}
-          data={data}
+          data={role === "student" ? { ...data, assignments: scopedAssignments } : data}
           close={() => setModal(null)}
           submit={(kind, payload) => {
             if (kind === "class") {
@@ -815,6 +1098,9 @@ export default function Home() {
                       (payload.name || "LOP").replace(/\s/g, "").toUpperCase() +
                       "26",
                     progress: 0,
+                    ownerKey: me,
+                    ownerName: session?.account?.name || "",
+                    members: [],
                   },
                 ],
               };
@@ -848,9 +1134,6 @@ export default function Home() {
                 if (ok) setModal(null);
               });
               return;
-            } else if (kind === "lesson") {
-              setView("Trình chiếu trên lớp");
-              notify("Hãy tải slide hoặc tài liệu để Kira AI tạo bài trình chiếu thật");
             } else if (kind === "submit") {
               let attachments: AssignmentAttachment[] = [];
               try { attachments = JSON.parse(payload.attachments || "[]") as AssignmentAttachment[]; } catch {}
@@ -867,18 +1150,34 @@ export default function Home() {
                 notify("Đã nộp bài và lưu trên Supabase");
               }).catch((error) => notify(error instanceof Error ? error.message : "Không thể nộp bài")).finally(() => setSaving(false));
               return;
-            } else {
-              notify("Chức năng trao đổi chưa được cấu hình người nhận");
-              return;
             }
             setModal(null);
           }}
+        />
+      )}
+      {attendanceClass && (
+        <AttendanceModal
+          classInfo={attendanceClass}
+          close={() => setAttendanceClass(null)}
+          save={(sessionRecord) =>
+            persist(
+              { ...data, attendanceSessions: [...data.attendanceSessions, sessionRecord] },
+              `Đã lưu điểm danh lớp ${attendanceClass.name}`,
+            ).then((ok) => {
+              if (ok) setAttendanceClass(null);
+            })
+          }
         />
       )}
       {editingAccount && (
         <AccountEditModal
           account={editingAccount}
           currentKey={session.account.accountKey}
+          students={accounts
+            .filter((a) => a.role === "student")
+            .map((a) => ({ key: a.accountKey, name: a.name }))}
+          linkedStudentKey={data.parentLinks[editingAccount.accountKey]?.studentKey || ""}
+          onLink={(studentKey) => linkParent(editingAccount, studentKey)}
           close={() => setEditingAccount(null)}
           save={saveAccount}
           remove={deleteAccount}
@@ -896,9 +1195,9 @@ export default function Home() {
         />
       )}
       {toast && (
-        <div className="toast">
-          <span>✓</span>
-          {toast}
+        <div className={`toast ${toast.tone === "error" ? "error" : ""}`} role="status">
+          <span>{toast.tone === "error" ? "!" : "✓"}</span>
+          {toast.message}
           {saving && <i />}
         </div>
       )}
@@ -1149,6 +1448,9 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
                   value={form.identifier || ""}
                   onChange={(e) => field("identifier", e.target.value)}
                   placeholder="Ví dụ: hoanganh hoặc email@..."
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitLogin();
+                  }}
                 />
               </label>
               <label className="auth-field">
@@ -1204,7 +1506,9 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
                   Tạo tài khoản bằng tên đăng nhập
                 </button>
                 <span>·</span>
-                <button>Liên hệ quản trị</button>
+                <a href="https://zalo.me/0965653750" target="_blank" rel="noreferrer">
+                  Liên hệ quản trị
+                </a>
               </div>
             </div>
           ) : (
@@ -1213,7 +1517,7 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
               <h2>Tham gia EduPlan AI</h2>
               <p>
                 Chỉ cần tên tài khoản và mật khẩu; email có thể để trống. Tài
-                đăng ký xong có thể sử dụng ngay, không cần chờ phê duyệt.
+                khoản đăng ký xong có thể sử dụng ngay, không cần chờ phê duyệt.
               </p>
               <div className="auth-form-grid">
                 <label className="auth-field">
@@ -1756,17 +2060,24 @@ function AccountsTable({
 function AccountEditModal({
   account,
   currentKey,
+  students,
+  linkedStudentKey,
+  onLink,
   close,
   save,
   remove,
 }: {
   account: ManagedAccount;
   currentKey: string;
+  students: { key: string; name: string }[];
+  linkedStudentKey: string;
+  onLink: (studentKey: string) => void;
   close: () => void;
   save: (account: ManagedAccount) => void;
   remove: (accountKey: string) => void;
 }) {
   const [draft, setDraft] = useState(account);
+  const [linked, setLinked] = useState(linkedStudentKey);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const protectedAccount = account.accountKey === currentKey;
   return (
@@ -1820,10 +2131,29 @@ function AccountEditModal({
             }
           >
             <option value="active">Đang hoạt động</option>
+            <option value="pending">Chờ duyệt</option>
             <option value="locked">Đã khóa</option>
           </select>
         </Field>
+        {draft.role === "parent" && (
+          <Field wide label="Liên kết với học sinh">
+            <select value={linked} onChange={(e) => setLinked(e.target.value)}>
+              <option value="">Chưa liên kết</option>
+              {students.map((student) => (
+                <option key={student.key} value={student.key}>
+                  {student.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
       </div>
+      {draft.role === "parent" && (
+        <p className="protected-note">
+          Sau khi liên kết, phụ huynh sẽ thấy kết quả học tập, chuyên cần và có
+          thể trao đổi với giáo viên phụ trách lớp của học sinh.
+        </p>
+      )}
       {protectedAccount && (
         <p className="protected-note">
           Tài khoản Admin đang đăng nhập được bảo vệ: không thể hạ quyền, khóa
@@ -1834,7 +2164,13 @@ function AccountEditModal({
         <button className="soft" onClick={close}>
           Hủy
         </button>
-        <button className="primary" onClick={() => save(draft)}>
+        <button
+          className="primary"
+          onClick={() => {
+            if (draft.role === "parent" && linked !== linkedStudentKey) onLink(linked);
+            save(draft);
+          }}
+        >
           Lưu thay đổi
         </button>
       </div>
@@ -1866,9 +2202,13 @@ function AccountEditModal({
 function ClassesGrid({
   classes,
   admin,
+  joinNote,
+  onAttendance,
 }: {
   classes: Workspace["classes"];
   admin?: boolean;
+  joinNote?: boolean;
+  onAttendance?: (c: Workspace["classes"][number]) => void;
 }) {
   return (
     <div className="class-grid">
@@ -1882,31 +2222,62 @@ function ClassesGrid({
             <small>{c.subject}</small>
             <h3>Lớp {c.name}</h3>
             <p>
-              {c.students} học sinh · Mã {c.code}
+              {c.members?.length ?? c.students} học sinh · Mã {c.code}
+              {c.ownerName ? ` · GV ${c.ownerName}` : ""}
             </p>
             <div className="progress">
               <i style={{ width: `${c.progress}%` }} />
             </div>
             <div>
-              <button onClick={() => navigator.clipboard?.writeText(c.code)}>
-                Sao chép mã
-              </button>
+              <CopyCodeButton code={c.code} />
+              {onAttendance && (
+                <button onClick={() => onAttendance(c)}>Điểm danh</button>
+              )}
             </div>
           </div>
         </article>
       ))}
-      {classes.length === 0 && <EmptyData title="Chưa có lớp học" note={admin ? "Lớp do giáo viên tạo sẽ được đồng bộ tại đây." : "Bấm Tạo mới để tạo lớp đầu tiên và nhận mã tham gia."} />}
+      {classes.length === 0 && (
+        <EmptyData
+          title={joinNote ? "Em chưa tham gia lớp nào" : "Chưa có lớp học"}
+          note={
+            joinNote
+              ? "Nhập mã lớp do giáo viên cung cấp ở ô phía trên để tham gia."
+              : admin
+                ? "Lớp do giáo viên tạo sẽ được đồng bộ tại đây."
+                : "Bấm Tạo mới để tạo lớp đầu tiên và nhận mã tham gia."
+          }
+        />
+      )}
     </div>
+  );
+}
+function CopyCodeButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(code);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1800);
+        } catch {}
+      }}
+    >
+      {copied ? "✓ Đã sao chép" : "Sao chép mã"}
+    </button>
   );
 }
 function Assignments({
   data,
   teacher,
+  submittedIds,
   onCreate,
   onOpenSubmissions,
 }: {
   data: Assignment[];
   teacher?: boolean;
+  submittedIds?: Set<string>;
   onCreate: () => void;
   onOpenSubmissions?: () => void;
 }) {
@@ -1922,7 +2293,9 @@ function Assignments({
         </button>
       </div>
       <div className="assignment-list">
-        {data.map((a) => (
+        {data.map((a) => {
+          const done = submittedIds?.has(String(a.id));
+          return (
           <article key={a.id}>
             <span>▤</span>
             <div>
@@ -1938,14 +2311,15 @@ function Assignments({
               <b>{a.progress}</b>
               <small>{teacher ? "đã nộp" : "tiến độ lớp"}</small>
             </div>
-            <em className="status wait">{a.status}</em>
+            <em className={`status ${done ? "ok" : "wait"}`}>{done ? "Đã nộp" : a.status}</em>
             <button
               onClick={() => teacher ? onOpenSubmissions?.() : onCreate()}
             >
-              {teacher ? "Xem bài" : "Làm bài"}
+              {teacher ? "Xem bài" : done ? "Nộp lại" : "Làm bài"}
             </button>
           </article>
-        ))}
+          );
+        })}
         {data.length === 0 && <EmptyData title={teacher ? "Chưa giao bài tập" : "Chưa có bài tập"} note={teacher ? "Tạo bài tập đầu tiên; hệ thống chỉ hiển thị dữ liệu đã lưu thật." : "Bài tập sẽ xuất hiện khi giáo viên giao trên hệ thống."} />}
       </div>
     </section>
@@ -1994,60 +2368,19 @@ function Settings({
     </div>
   );
 }
-function AiStudio({
-  onCreate,
-  onAction,
-}: {
-  onCreate: () => void;
-  onAction: (m: string) => void;
-}) {
-  return (
-    <div className="ai-layout">
-      <section className="ai-hero">
-        <span>✦ TRỢ LÝ AI SOẠN GIẢNG</span>
-        <h2>Một chủ đề, trọn bộ học liệu.</h2>
-        <p>
-          AI xây dựng nội dung theo CTGDPT 2018 và cấu trúc hoạt động của Công
-          văn 5512.
-        </p>
-        <button onClick={onCreate}>✦ Bắt đầu tạo bài dạy →</button>
-      </section>
-      <div className="ai-tools">
-        {[
-          ["KHBD 5512", "Mục tiêu, thiết bị, tiến trình 4 hoạt động"],
-          ["Slide bài giảng", "Bố cục trình chiếu và ghi chú giáo viên"],
-          ["Phiếu học tập", "Câu hỏi, nhiệm vụ và tiêu chí đánh giá"],
-          ["Ngân hàng câu hỏi", "Trắc nghiệm, tự luận kèm đáp án"],
-        ].map((t, i) => (
-          <article key={t[0]}>
-            <span>{["✦", "▰", "▤", "✓"][i]}</span>
-            <div>
-              <b>{t[0]}</b>
-              <small>{t[1]}</small>
-            </div>
-            <button
-              onClick={() =>
-                i === 0 ? onCreate() : onAction(`Đã mở công cụ ${t[0]}`)
-              }
-            >
-              Mở →
-            </button>
-          </article>
-        ))}
-      </div>
-    </div>
-  );
-}
 function LearningResources({ assignments }: { assignments: Assignment[] }) {
   const files = assignments.flatMap((assignment) => (assignment.attachments || []).map((file) => ({ ...file, assignment: assignment.title })));
   if (!files.length) return <EmptyData title="Chưa có học liệu" note="Tệp giáo viên đính kèm trong bài tập sẽ xuất hiện tại đây." />;
   return <div className="resource-grid">{files.map((file) => <article key={file.id}><span>▤</span><small>TỆP HỌC LIỆU</small><h3>{file.name}</h3><p>{file.assignment}</p><a href={file.url} target="_blank" rel="noreferrer">Mở học liệu →</a></article>)}</div>;
 }
 
-function StudentResults({ records, assignments }: { records: Workspace["submissionRecords"]; assignments: Assignment[] }) {
+function StudentResults({ records, assignments, examResults = [], assessments = [], studentName }: { records: Workspace["submissionRecords"]; assignments: Assignment[]; examResults?: AssessmentResult[]; assessments?: Array<Record<string, unknown>>; studentName?: string }) {
   const graded = records.filter((record) => record.score !== undefined && record.score !== "");
-  if (!graded.length) return <EmptyData title="Chưa có kết quả" note="Điểm và phản hồi sẽ xuất hiện sau khi giáo viên chấm bài." />;
-  return <section className="panel table-panel"><div className="toolbar"><div><b>Kết quả học tập</b><small>Dữ liệu chấm bài đã lưu trên Supabase</small></div></div><div className="assignment-list">{graded.map((record) => { const assignment = assignments.find((item) => String(item.id) === record.assignmentId); return <article key={record.id}><span>✓</span><div><b>{assignment?.title || "Bài tập"}</b><p>{record.feedback || "Chưa có nhận xét"}</p></div><strong>{record.score}</strong><em className="status ok">Đã chấm</em></article>; })}</div></section>;
+  if (!graded.length && !examResults.length) return <EmptyData title="Chưa có kết quả" note="Điểm và phản hồi sẽ xuất hiện sau khi giáo viên chấm bài hoặc học sinh hoàn thành bài kiểm tra." />;
+  return <section className="panel table-panel"><div className="toolbar"><div><b>{studentName ? `Kết quả học tập của ${studentName}` : "Kết quả học tập"}</b><small>Dữ liệu chấm bài và kiểm tra đã lưu trên Supabase</small></div></div><div className="assignment-list">
+    {graded.map((record) => { const assignment = assignments.find((item) => String(item.id) === record.assignmentId); return <article key={record.id}><span>✓</span><div><small>BÀI TẬP</small><b>{assignment?.title || "Bài tập"}</b><p>{record.feedback || "Chưa có nhận xét"}</p></div><strong>{record.score}</strong><em className="status ok">Đã chấm</em></article>; })}
+    {examResults.map((result) => { const assessment = assessments.find((item) => String(item.id) === result.assessmentId); return <article key={`exam-${result.id}`}><span>▤</span><div><small>KIỂM TRA</small><b>{String(assessment?.title || "Bài kiểm tra")}</b><p>{result.essayPending ? "Phần tự luận chờ giáo viên chấm" : "Đã chấm tự động"}{result.submittedAt ? ` · ${new Date(result.submittedAt).toLocaleString("vi-VN")}` : ""}</p></div><strong>{result.total ? `${Math.round((result.score / result.total) * 100) / 10}/10` : result.score}</strong><em className={`status ${result.essayPending ? "wait" : "ok"}`}>{result.essayPending ? "Chờ chấm tự luận" : "Hoàn thành"}</em></article>; })}
+  </div></section>;
 }
 
 function EmptyData({ title, note }: { title: string; note: string }) {
@@ -2055,19 +2388,25 @@ function EmptyData({ title, note }: { title: string; note: string }) {
 }
 function NotificationList({
   items,
+  me = "",
 }: {
   items: Workspace["notifications"];
+  me?: string;
 }) {
   return (
     <section className="panel notification-list">
       {items.map((n) => (
-        <article className={n.read ? "" : "unread"} key={n.id}>
+        <article
+          className={n.read || (n.readBy || []).includes(me) ? "" : "unread"}
+          key={n.id}
+        >
           <span>♢</span>
           <div>
             <b>{n.title}</b>
             <p>{n.body}</p>
             <small>
-              {n.audience} · {n.time}
+              {n.audience}
+              {n.senderName ? ` · ${n.senderName}` : ""} · {n.time}
             </small>
           </div>
         </article>
@@ -2084,7 +2423,10 @@ function Grading({ records, assignments, onGrade }: { records: Workspace["submis
 function GradeRow({ record, assignment, onSave }: { record: Workspace["submissionRecords"][number]; assignment?: Assignment; onSave: (id: string, score: string, feedback: string) => void }) {
   const [score, setScore] = useState(record.score || "");
   const [feedback, setFeedback] = useState(record.feedback || "");
-  return <article><span>{initials(record.studentName || "HS")}</span><div><b>{record.studentName || "Học sinh"}</b><small>{assignment?.title || "Bài tập"} · {record.submittedAt ? new Date(record.submittedAt).toLocaleString("vi-VN") : "Đã nộp"}</small>{record.contentHtml && <p className="assignment-excerpt">{record.contentHtml.replace(/<[^>]*>/g, " ").trim().slice(0, 160)}</p>}</div><input aria-label="Điểm" value={score} onChange={(event) => setScore(event.target.value)} placeholder="Điểm" /><input aria-label="Nhận xét" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Nhận xét" /><button disabled={!score.trim()} onClick={() => onSave(record.id, score.trim(), feedback.trim())}>Lưu điểm</button></article>;
+  const maxScore = Number(assignment?.maxScore);
+  const scoreValue = Number(score.trim().replace(",", "."));
+  const invalidScore = score.trim() !== "" && Number.isFinite(maxScore) && maxScore > 0 && (!Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > maxScore);
+  return <article><span>{initials(record.studentName || "HS")}</span><div><b>{record.studentName || "Học sinh"}</b><small>{assignment?.title || "Bài tập"} · {record.submittedAt ? new Date(record.submittedAt).toLocaleString("vi-VN") : "Đã nộp"}</small>{record.contentHtml && <p className="assignment-excerpt">{record.contentHtml.replace(/<[^>]*>/g, " ").trim().slice(0, 160)}</p>}</div><input aria-label="Điểm" aria-invalid={invalidScore} value={score} onChange={(event) => setScore(event.target.value)} placeholder={Number.isFinite(maxScore) && maxScore > 0 ? `Điểm /${maxScore}` : "Điểm"} title={invalidScore ? `Điểm phải là số từ 0 đến ${maxScore}` : undefined} /><input aria-label="Nhận xét" value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="Nhận xét" /><button disabled={!score.trim() || invalidScore} onClick={() => onSave(record.id, score.trim(), feedback.trim())}>Lưu điểm</button></article>;
 }
 
 function ContentModeration({ data }: { data: Workspace }) {
@@ -2141,7 +2483,6 @@ function ActionModal({
   close: () => void;
   submit: (kind: string, payload: Record<string, string>) => void;
 }) {
-  const [step, setStep] = useState(0);
   const [payload, setPayload] = useState<Record<string, string>>({});
   const set = (k: string, v: string) => setPayload((p) => ({ ...p, [k]: v }));
   if (modal === "process")
@@ -2164,72 +2505,14 @@ function ActionModal({
       </ModalShell>
     );
   const titles: Record<string, string> = {
-    lesson: "Tạo bộ bài dạy bằng AI",
     assignment: "Giao bài tập mới",
     class: "Tạo lớp học",
     submit: "Nộp bài tập",
-    message: "Nhắn tin cho giáo viên",
     register: "Tạo tài khoản mới",
   };
   return (
     <ModalShell title={titles[modal]} close={close}>
-      {modal === "lesson" ? (
-        <>
-          {step === 0 ? (
-            <div className="form-grid">
-              <Field label="Môn học">
-                <select onChange={(e) => set("subject", e.target.value)}>
-                  <option>Ngữ văn</option>
-                  <option>Toán</option>
-                  <option>Tiếng Anh</option>
-                  <option>Vật lí</option>
-                </select>
-              </Field>
-              <Field label="Khối lớp">
-                <select>
-                  <option>10</option>
-                  <option>11</option>
-                  <option>12</option>
-                </select>
-              </Field>
-              <Field wide label="Chủ đề">
-                <input
-                  onChange={(e) => set("name", e.target.value)}
-                  defaultValue="Thần thoại và sử thi"
-                />
-              </Field>
-              <Field wide label="Yêu cầu cần đạt">
-                <textarea defaultValue="Nhận biết đặc trưng thể loại; phân tích nhân vật; vận dụng sáng tạo." />
-              </Field>
-              <button className="primary full wide" onClick={() => setStep(1)}>
-                ✦ Tạo với AI →
-              </button>
-            </div>
-          ) : (
-            <div className="generation-result">
-              <span>✓</span>
-              <h3>Đã tạo trọn bộ học liệu</h3>
-              <p>KHBD 5512 · 18 slide · 02 phiếu học tập · 20 câu hỏi</p>
-              <div>
-                {[
-                  "Mục tiêu và yêu cầu cần đạt",
-                  "Tiến trình 4 hoạt động",
-                  "Đánh giá theo năng lực",
-                  "Học liệu kèm đáp án",
-                ].map((x) => (
-                  <b key={x}>✓ {x}</b>
-                ))}
-              </div>
-              <button
-                className="primary full"
-                onClick={() => submit("lesson", payload)}
-              >
-                Lưu vào kho học liệu
-              </button>
-            </div>
-          )}
-        </>
-      ) : modal === "assignment" ? (
+      {modal === "assignment" ? (
         <AssignmentComposer classes={data.classes} onSubmit={(assignment) => submit("assignment", assignment)} />
       ) : modal === "class" ? (
         <div className="form-grid">
@@ -2301,29 +2584,8 @@ function ActionModal({
             Tạo tài khoản và cấp quyền
           </button>
         </div>
-      ) : modal === "submit" ? (
-        <AssignmentComposer mode="submit" classes={data.classes} assignments={data.assignments} onSubmit={(submission) => submit("submit", submission)} />
       ) : (
-        <div>
-          <Field label="Giáo viên">
-            <select>
-              <option>Cô Nguyễn Minh Châu</option>
-              <option>Thầy Trần Anh Tuấn</option>
-            </select>
-          </Field>
-          <Field label="Nội dung">
-            <textarea
-              onChange={(e) => set("body", e.target.value)}
-              placeholder="Nhập nội dung cần trao đổi..."
-            />
-          </Field>
-          <button
-            className="primary full"
-            onClick={() => submit("message", payload)}
-          >
-            Gửi tin nhắn
-          </button>
-        </div>
+        <AssignmentComposer mode="submit" classes={data.classes} assignments={data.assignments} onSubmit={(submission) => submit("submit", submission)} />
       )}
     </ModalShell>
   );
@@ -2372,6 +2634,320 @@ function Field({
     </label>
   );
 }
+function JoinClassPanel({ onJoin, busy }: { onJoin: (code: string) => Promise<boolean>; busy: boolean }) {
+  const [code, setCode] = useState("");
+  return (
+    <section className="join-class-panel">
+      <div>
+        <b>Tham gia lớp học bằng mã</b>
+        <small>Nhập mã do giáo viên cung cấp (ví dụ: 10A426) để vào lớp và nhận bài tập.</small>
+      </div>
+      <div className="join-class-form">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="Nhập mã lớp"
+          aria-label="Mã lớp"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && code.trim()) void onJoin(code.trim()).then((ok) => ok && setCode(""));
+          }}
+        />
+        <button
+          className="primary"
+          disabled={busy || !code.trim()}
+          onClick={() => void onJoin(code.trim()).then((ok) => ok && setCode(""))}
+        >
+          {busy ? "Đang xử lý..." : "Tham gia lớp"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function NotificationCenter({
+  items,
+  me,
+  classes,
+  zaloConnected,
+  onSend,
+}: {
+  items: Workspace["notifications"];
+  me: string;
+  classes: Workspace["classes"];
+  zaloConnected: boolean;
+  onSend: (payload: { title: string; body: string; audience: string; zaloIds: string[] }) => Promise<boolean>;
+}) {
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [audience, setAudience] = useState("Toàn trung tâm");
+  const [zaloIds, setZaloIds] = useState("");
+  const [sending, setSending] = useState(false);
+  const send = async () => {
+    if (!title.trim() || !body.trim()) return;
+    setSending(true);
+    const ok = await onSend({
+      title: title.trim(),
+      body: body.trim(),
+      audience,
+      zaloIds: zaloIds.split(/[,\s]+/).map((id) => id.trim()).filter(Boolean),
+    });
+    if (ok) {
+      setTitle("");
+      setBody("");
+      setZaloIds("");
+    }
+    setSending(false);
+  };
+  return (
+    <div className="notification-center">
+      <section className="panel notification-composer">
+        <div className="panel-head">
+          <div>
+            <b>Gửi thông báo mới</b>
+            <small>Thông báo lưu trong hệ thống; học sinh và phụ huynh thấy theo phạm vi lớp</small>
+          </div>
+        </div>
+        <div className="composer-fields">
+          <label>
+            Tiêu đề
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ví dụ: Lịch kiểm tra giữa kỳ" />
+          </label>
+          <label>
+            Phạm vi nhận
+            <select value={audience} onChange={(e) => setAudience(e.target.value)}>
+              <option>Toàn trung tâm</option>
+              {classes.map((c) => (
+                <option key={c.id} value={c.name}>Lớp {c.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="wide">
+            Nội dung
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Nội dung thông báo gửi tới học sinh và phụ huynh..." />
+          </label>
+          <label className="wide">
+            Gửi kèm Zalo OA <small>{zaloConnected ? "(tùy chọn · nhập user_id người quan tâm OA, cách nhau bằng dấu phẩy)" : "(Zalo OA chưa được cấu hình — chỉ gửi trong hệ thống)"}</small>
+            <input
+              value={zaloIds}
+              onChange={(e) => setZaloIds(e.target.value)}
+              placeholder={zaloConnected ? "Ví dụ: 8412345,8467890" : "Không khả dụng"}
+              disabled={!zaloConnected}
+            />
+          </label>
+        </div>
+        <button className="primary full" disabled={sending || !title.trim() || !body.trim()} onClick={() => void send()}>
+          {sending ? "Đang gửi..." : "Gửi thông báo"}
+        </button>
+      </section>
+      <NotificationList items={items} me={me} />
+    </div>
+  );
+}
+
+function MessagesPanel({
+  me,
+  messages,
+  contacts,
+  onSend,
+  emptyNote,
+}: {
+  me: string;
+  messages: WorkspaceMessage[];
+  contacts: { key: string; name: string; note: string }[];
+  onSend: (toKey: string, body: string) => Promise<boolean>;
+  emptyNote: string;
+}) {
+  const [selected, setSelected] = useState(contacts[0]?.key || "");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const active = contacts.find((contact) => contact.key === selected) || contacts[0];
+  const thread = active
+    ? messages.filter(
+        (m) => (m.fromKey === me && m.toKey === active.key) || (m.fromKey === active.key && m.toKey === me),
+      )
+    : [];
+  if (!contacts.length)
+    return <EmptyData title="Chưa có cuộc trao đổi" note={emptyNote} />;
+  const send = async () => {
+    if (!active || !body.trim()) return;
+    setSending(true);
+    const ok = await onSend(active.key, body.trim());
+    if (ok) setBody("");
+    setSending(false);
+  };
+  return (
+    <div className="message-layout">
+      <section className="panel conversations">
+        {contacts.map((contact) => {
+          const last = messages.filter((m) => (m.fromKey === me && m.toKey === contact.key) || (m.fromKey === contact.key && m.toKey === me)).at(-1);
+          return (
+            <article
+              key={contact.key}
+              className={active?.key === contact.key ? "selected" : ""}
+              onClick={() => setSelected(contact.key)}
+            >
+              <span>{initials(contact.name)}</span>
+              <div>
+                <b>{contact.name}</b>
+                <p>{last ? last.body.slice(0, 60) : contact.note || "Bắt đầu trao đổi"}</p>
+              </div>
+              <small>{last ? new Date(last.time).toLocaleDateString("vi-VN") : ""}</small>
+            </article>
+          );
+        })}
+      </section>
+      <section className="panel chat-preview">
+        <div>
+          <span>{initials(active?.name || "?")}</span>
+          <b>{active?.name}</b>
+          <small>{active?.note || "Trao đổi trực tiếp trong EduPlan AI"}</small>
+        </div>
+        <div className="bubbles">
+          {thread.map((m) => (
+            <p key={m.id} className={m.fromKey === me ? "mine" : ""} title={new Date(m.time).toLocaleString("vi-VN")}>
+              {m.body}
+            </p>
+          ))}
+          {!thread.length && <small className="chat-empty">Chưa có tin nhắn nào trong cuộc trao đổi này.</small>}
+        </div>
+        <div className="chat-compose">
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Nhập nội dung trao đổi..."
+            rows={2}
+          />
+          <button className="primary" disabled={sending || !body.trim()} onClick={() => void send()}>
+            {sending ? "Đang gửi..." : "Gửi"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AttendanceModal({
+  classInfo,
+  close,
+  save,
+}: {
+  classInfo: Workspace["classes"][number];
+  close: () => void;
+  save: (session: AttendanceSession) => void;
+}) {
+  const [date, setDate] = useState(() =>
+    new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10),
+  );
+  const [absent, setAbsent] = useState<Set<string>>(new Set());
+  const members = classInfo.members || [];
+  const toggle = (key: string) =>
+    setAbsent((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  return (
+    <ModalShell title={`Điểm danh lớp ${classInfo.name}`} close={close}>
+      <label className="attendance-date">
+        Ngày điểm danh
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </label>
+      {members.length === 0 ? (
+        <EmptyData title="Lớp chưa có học sinh" note="Học sinh tham gia bằng mã lớp sẽ xuất hiện trong danh sách điểm danh." />
+      ) : (
+        <div className="attendance-list">
+          <small>Bỏ chọn học sinh vắng mặt ({members.length - absent.size}/{members.length} có mặt)</small>
+          {members.map((member) => (
+            <label key={member.key} className={absent.has(member.key) ? "absent" : ""}>
+              <input
+                type="checkbox"
+                checked={!absent.has(member.key)}
+                onChange={() => toggle(member.key)}
+              />
+              <b>{member.name}</b>
+              <em>{absent.has(member.key) ? "Vắng" : "Có mặt"}</em>
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="account-modal-actions">
+        <button className="soft" onClick={close}>
+          Hủy
+        </button>
+        <button
+          className="primary"
+          disabled={!members.length || !date}
+          onClick={() =>
+            save({
+              id: `att-${Date.now()}`,
+              classId: classInfo.id,
+              className: classInfo.name,
+              date,
+              absentKeys: [...absent],
+              total: members.length,
+            })
+          }
+        >
+          Lưu điểm danh
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function AttendanceOverview({
+  sessions,
+  childKey,
+  childName,
+  classes,
+}: {
+  sessions: AttendanceSession[];
+  childKey: string;
+  childName: string;
+  classes: Workspace["classes"];
+}) {
+  if (!sessions.length)
+    return <EmptyData title="Chưa có dữ liệu chuyên cần" note={`Giáo viên chưa điểm danh các lớp của ${childName}.`} />;
+  const absent = sessions.filter((s) => s.absentKeys.includes(childKey));
+  const percent = Math.round(((sessions.length - absent.length) / sessions.length) * 100);
+  const ordered = [...sessions].sort((a, b) => b.date.localeCompare(a.date));
+  return (
+    <div className="attendance-grid">
+      <section className="panel attendance-score">
+        <div className="ring">
+          <b>{percent}%</b>
+          <small>chuyên cần</small>
+        </div>
+        <div>
+          <h3>{childName}</h3>
+          <p>
+            Có mặt {sessions.length - absent.length}/{sessions.length} buổi ·{" "}
+            {classes.map((c) => c.name).join(", ") || "Chưa vào lớp"}
+          </p>
+        </div>
+      </section>
+      <section className="panel attendance-log">
+        <div className="panel-head">
+          <div>
+            <b>Nhật ký điểm danh</b>
+            <small>Theo từng buổi giáo viên đã lưu</small>
+          </div>
+        </div>
+        {ordered.slice(0, 20).map((s) => (
+          <div className="attendance-row" key={s.id}>
+            <b>{new Date(`${s.date}T00:00:00`).toLocaleDateString("vi-VN")}</b>
+            <span>Lớp {s.className}</span>
+            <em className={`status ${s.absentKeys.includes(childKey) ? "off" : "ok"}`}>
+              {s.absentKeys.includes(childKey) ? "Vắng mặt" : "Có mặt"}
+            </em>
+          </div>
+        ))}
+      </section>
+    </div>
+  );
+}
+
 function quickActions(role: Role) {
   return role === "admin"
     ? [
@@ -2470,7 +3046,7 @@ function quickActions(role: Role) {
             {
               icon: "↗",
               label: "Kết quả của con",
-              note: "Cần liên kết học sinh",
+              note: "Theo học sinh đã liên kết",
               action: "Kết quả của con",
             },
             {
@@ -2483,7 +3059,7 @@ function quickActions(role: Role) {
               icon: "✉",
               label: "Nhắn giáo viên",
               note: "Trao đổi trực tiếp",
-              action: "message",
+              action: "Trao đổi",
             },
           ];
 }
@@ -2533,6 +3109,8 @@ function menuIcon(item: string) {
               ? "▣"
           : item.includes("Bài") || item.includes("Chấm")
             ? "▤"
+            : item.includes("Trao")
+              ? "✉"
             : item.includes("Thông")
               ? "♢"
               : item.includes("Kết")
@@ -2540,6 +3118,16 @@ function menuIcon(item: string) {
                 : item.includes("Cấu")
                   ? "⚙"
                   : "◫";
+}
+function greeting() {
+  const hour = new Date().getHours();
+  return hour < 11
+    ? "Chào buổi sáng"
+    : hour < 13
+      ? "Chào buổi trưa"
+      : hour < 18
+        ? "Chào buổi chiều"
+        : "Chào buổi tối";
 }
 function initials(name: string) {
   return name

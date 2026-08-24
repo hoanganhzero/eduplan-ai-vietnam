@@ -73,10 +73,13 @@ export function InteractiveVideoEditor({ value, onChange, context, notify, focus
   const [audioUrl, setAudioUrl] = useState("");
   const setConfig = (changes: Partial<InteractiveVideoConfig>) => onChange({ ...config, ...changes, checkpoints: changes.checkpoints || config.checkpoints || [] });
   const updateCheckpoint = (id: string, changes: Partial<VideoCheckpoint>) => setConfig({ checkpoints: config.checkpoints.map((item) => item.id === id ? { ...item, ...changes } : item) });
-  const addCheckpoint = () => setConfig({ checkpoints: [...config.checkpoints, {
-    id: checkpointId(), timeSeconds: 60, title: `Câu hỏi ${config.checkpoints.length + 1}`, questionType: "multiple_choice",
-    prompt: "", options: ["Phương án A", "Phương án B", "Phương án C", "Phương án D"], correctAnswer: "Phương án A", points: 10, required: true,
-  }].sort((a, b) => a.timeSeconds - b.timeSeconds) });
+  const addCheckpoint = () => {
+    const checkpoint: VideoCheckpoint = {
+      id: checkpointId(), timeSeconds: 60, title: `Câu hỏi ${config.checkpoints.length + 1}`, questionType: "multiple_choice",
+      prompt: "", options: ["Phương án A", "Phương án B", "Phương án C", "Phương án D"], correctAnswer: "Phương án A", points: 10, required: true,
+    };
+    setConfig({ checkpoints: [...config.checkpoints, checkpoint].sort((a, b) => a.timeSeconds - b.timeSeconds) });
+  };
 
   const upload = async (file: File, sourceType: "video" | "slides") => {
     setUploading(true);
@@ -129,7 +132,7 @@ export function InteractiveVideoEditor({ value, onChange, context, notify, focus
       <label>Kịch bản giọng đọc<textarea rows={7} value={config.narrationScript || ""} onChange={(event) => setConfig({ narrationScript: event.target.value })} placeholder="Nội dung giáo viên muốn giọng AI thuyết minh theo từng slide..." /></label>
       <div><label>Giọng đọc<select value={config.voice || "nova"} onChange={(event) => setConfig({ voice: event.target.value })}><option value="nova">Nova · Nữ, sáng rõ</option><option value="alloy">Alloy · Trung tính</option><option value="echo">Echo · Nam, ấm</option><option value="onyx">Onyx · Nam, trầm</option><option value="fable">Fable · Kể chuyện</option></select></label><button disabled={busy} onClick={previewVoice}>{busy ? "Đang xử lý..." : "▶ Nghe giọng đọc thử"}</button>{audioUrl && <audio controls src={audioUrl} />}</div>
     </div>}
-    {config.sourceType === "slides" && <label className="video-output-url">Video bài giảng sau khi AI kết xuất<input value={config.videoUrl || ""} onChange={(event) => setConfig({ videoUrl: event.target.value })} placeholder="Đường dẫn video sẽ xuất hiện sau khi tạo xong" /><small>AI tạo kịch bản, giọng đọc và đồng bộ với từng slide. Video hoàn chỉnh dùng trong trình phát khóa tua của học sinh.</small></label>}
+    {config.sourceType === "slides" && <label className="video-output-url">Đường dẫn video bài giảng hoàn chỉnh<input value={config.videoUrl || ""} onChange={(event) => setConfig({ videoUrl: event.target.value })} placeholder="Dán đường dẫn video sau khi thầy cô ghi hình/kết xuất" /><small>Quy trình: tải kịch bản AI và giọng đọc thử ở trên, ghi hình bài giảng từ slide (ví dụ quay màn hình kèm giọng đọc), rồi tải video lên mục &quot;Dùng video có sẵn&quot; hoặc dán đường dẫn video tại đây. Hệ thống chưa tự kết xuất video từ slide.</small></label>}
     </>}
     {focus !== "source" && <>
     <div className="timeline-head"><div><b>Dòng thời gian tương tác</b><small>{config.checkpoints.length} mốc · video tự dừng để học sinh trả lời</small></div><button onClick={addCheckpoint}>＋ Thêm câu hỏi theo phút</button></div>
