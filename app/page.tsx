@@ -1269,10 +1269,10 @@ const siteNews = [
   },
 ];
 const siteOrgUnits = [
-  { label: "Ban Giám đốc", note: "Chỉ đạo, điều hành chung mọi hoạt động của Trung tâm" },
-  { label: "Tổ Hành chính - Tổng hợp", note: "Văn thư, tài vụ, cơ sở vật chất, công tác học viên" },
-  { label: "Tổ chuyên môn Giáo dục thường xuyên", note: "Giảng dạy chương trình văn hóa THCS, THPT hệ GDTX" },
-  { label: "Tổ chuyên môn Giáo dục nghề nghiệp", note: "Đào tạo trung cấp, sơ cấp nghề, liên kết doanh nghiệp" },
+  { code: "BGĐ", label: "Ban Giám đốc", note: "Chỉ đạo, điều hành chung mọi hoạt động của Trung tâm" },
+  { code: "HC", label: "Tổ Hành chính - Tổng hợp", note: "Văn thư, tài vụ, cơ sở vật chất, công tác học viên" },
+  { code: "GDTX", label: "Tổ chuyên môn Giáo dục thường xuyên", note: "Giảng dạy chương trình văn hóa THCS, THPT hệ GDTX" },
+  { code: "GDNN", label: "Tổ chuyên môn Giáo dục nghề nghiệp", note: "Đào tạo trung cấp, sơ cấp nghề, liên kết doanh nghiệp" },
 ];
 const sitePrograms = [
   { code: "TH", name: "Tin học văn phòng" },
@@ -1300,6 +1300,16 @@ function PublicHome({ registered }: { registered: boolean }) {
 
   return (
     <main className="public-site simple-home">
+      <div className="site-topbar">
+        <div>
+          <a href="https://zalo.me/0965653750" target="_blank" rel="noreferrer"><span>☏</span> 0965653750 (Zalo hỗ trợ)</a>
+          <span><span>✉</span> Email: đang cập nhật</span>
+        </div>
+        <div>
+          <a href="#tuyen-sinh">Tuyển sinh {new Date().getFullYear()}</a>
+          <button onClick={() => openAuth("login")}>Cổng thông tin nội bộ →</button>
+        </div>
+      </div>
       <header className="simple-nav">
         <a className="simple-brand" href="#top" aria-label="Trung tâm GDNN-GDTX khu vực Tân Ninh - Trang chủ">
           <span>TN</span>
@@ -1310,6 +1320,7 @@ function PublicHome({ registered }: { registered: boolean }) {
           <a href="#tin-tuc">Tin tức</a>
           <a href="#tuyen-sinh">Tuyển sinh</a>
           <a href="#van-ban">Văn bản</a>
+          <a href="#thu-vien-anh">Thư viện ảnh</a>
           <a href="#lien-he">Liên hệ</a>
         </nav>
         <div className="simple-nav-actions">
@@ -1361,7 +1372,7 @@ function PublicHome({ registered }: { registered: boolean }) {
         </div>
         <div className="org-grid" aria-label="Cơ cấu tổ chức">
           {siteOrgUnits.map((u) => (
-            <article key={u.label}><b>{u.label}</b><p>{u.note}</p></article>
+            <article key={u.label}><i>{u.code}</i><b>{u.label}</b><p>{u.note}</p></article>
           ))}
         </div>
       </section>
@@ -1374,10 +1385,12 @@ function PublicHome({ registered }: { registered: boolean }) {
         </div>
         <div className="admissions-tracks">
           <article>
+            <span className="simple-icon blue">VH</span>
             <b>Giáo dục thường xuyên (GDTX)</b>
             <p>Chương trình văn hóa cấp THCS và THPT dành cho học viên vừa học vừa làm hoặc không theo học hệ chính quy.</p>
           </article>
           <article>
+            <span className="simple-icon orange">NN</span>
             <b>Giáo dục nghề nghiệp (GDNN)</b>
             <p>Đào tạo trình độ sơ cấp, trung cấp nghề, gắn lý thuyết với thực hành và liên kết doanh nghiệp.</p>
           </article>
@@ -1399,10 +1412,13 @@ function PublicHome({ registered }: { registered: boolean }) {
         <div className="news-grid">
           {siteNews.map((n) => (
             <article key={n.title}>
-              <em>{n.tag}</em>
-              <h3>{n.title}</h3>
-              <p>{n.excerpt}</p>
-              <small>{n.date}</small>
+              <div className="news-thumb"><span>{n.tag === "Sự kiện" ? "✦" : n.tag === "Thành tích" ? "✓" : "▤"}</span></div>
+              <div className="news-body">
+                <em>{n.tag}</em>
+                <h3>{n.title}</h3>
+                <p>{n.excerpt}</p>
+                <small>{n.date}</small>
+              </div>
             </article>
           ))}
         </div>
@@ -1458,10 +1474,10 @@ function PublicHome({ registered }: { registered: boolean }) {
           <h2>Kết nối với Trung tâm</h2>
         </div>
         <div className="contact-grid">
-          <article><b>Địa chỉ</b><p>Khu vực Tân Ninh, tỉnh Tây Ninh (đang cập nhật địa chỉ chi tiết)</p></article>
-          <article><b>Điện thoại</b><p>Đang cập nhật</p></article>
-          <article><b>Email</b><p>Đang cập nhật</p></article>
-          <article><b>Giờ làm việc</b><p>Thứ 2 - Thứ 6: 7h30 - 17h00</p></article>
+          <article><span className="simple-icon blue">◈</span><b>Địa chỉ</b><p>Khu vực Tân Ninh, tỉnh Tây Ninh (đang cập nhật địa chỉ chi tiết)</p></article>
+          <article><span className="simple-icon violet">☏</span><b>Điện thoại</b><p>Đang cập nhật</p></article>
+          <article><span className="simple-icon orange">✉</span><b>Email</b><p>Đang cập nhật</p></article>
+          <article><span className="simple-icon teal">◷</span><b>Giờ làm việc</b><p>Thứ 2 - Thứ 6: 7h30 - 17h00</p></article>
         </div>
         <p className="site-note">Cần hỗ trợ hệ thống học tập trực tuyến? Liên hệ quản trị qua Zalo: <a href="https://zalo.me/0965653750" target="_blank" rel="noreferrer">0965653750</a></p>
       </section>

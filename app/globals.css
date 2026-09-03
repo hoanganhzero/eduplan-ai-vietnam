@@ -265,3 +265,49 @@ input,textarea,select,button{font-variant-ligatures:common-ligatures}
   .site-section{padding:52px 18px}
   .site-mission-grid,.org-grid,.admissions-tracks,.program-grid,.news-grid,.gallery-grid,.contact-grid{grid-template-columns:1fr}
 }
+
+/* Top utility bar */
+.site-topbar{position:fixed;inset:0 0 auto 0;z-index:82;height:34px;display:flex;align-items:center;gap:18px;background:#082d61;color:#c7dbf3;padding:0 max(6vw,28px);font-size:8px;font-weight:700}
+.site-topbar>div{display:flex;align-items:center;gap:18px}
+.site-topbar>div:last-child{margin-left:auto}
+.site-topbar a,.site-topbar span{display:inline-flex;align-items:center;gap:5px;color:#c7dbf3;text-decoration:none}
+.site-topbar a:hover{color:#fff}
+.site-topbar button{border:0;background:rgba(255,255,255,.12);color:#fff;border-radius:99px;padding:5px 11px;font-size:8px;font-weight:800;cursor:pointer}
+.site-topbar button:hover{background:rgba(255,255,255,.22)}
+.simple-nav{top:34px}
+.simple-hero{padding-top:179px}
+@media(max-width:1040px){
+  .site-topbar>div:first-child span:last-child{display:none}
+  .simple-nav{gap:14px;padding:0 20px}
+  .simple-brand small{display:none}
+  .simple-nav nav{gap:14px}
+  .simple-nav nav a{font-size:8px;white-space:nowrap}
+  .simple-nav-actions button{padding:0 11px}
+}
+@media(max-width:760px){.site-topbar{display:none}.simple-nav{top:0}.simple-hero{padding-top:118px}}
+
+/* Card polish: hover lift + consistent shadow on the new content grids */
+.site-mission-grid article,.org-grid article,.admissions-tracks article,.program-grid article,.news-grid article,.doc-list article,.contact-grid article,.gallery-grid article{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
+.org-grid article,.admissions-tracks article,.program-grid article,.doc-list article,.contact-grid article{box-shadow:0 8px 25px rgba(20,63,111,.05)}
+.site-mission-grid article:hover,.org-grid article:hover,.admissions-tracks article:hover,.program-grid article:hover,.news-grid article:hover,.doc-list article:hover,.contact-grid article:hover{transform:translateY(-3px);border-color:#b9d3f2;box-shadow:0 14px 32px rgba(20,63,111,.1)}
+.gallery-grid article:hover{transform:translateY(-3px) scale(1.015);box-shadow:0 14px 32px rgba(8,103,232,.22)}
+
+.simple-icon.teal{background:#e0f7fa;color:#0891b2}
+.admissions-tracks .simple-icon,.contact-grid .simple-icon{margin-bottom:12px}
+.org-grid article>i{display:inline-flex;font-style:normal;background:#eaf3ff;color:#0867e8;border-radius:7px;padding:4px 8px;font-size:7px;font-weight:900;margin-bottom:10px}
+
+/* News cards with a photo-like accent header */
+.news-grid article{padding:0}
+.news-thumb{height:104px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;border-radius:16px 16px 0 0}
+.news-grid article:nth-child(1) .news-thumb{background:linear-gradient(135deg,#0867e8,#1ac4d5)}
+.news-grid article:nth-child(2) .news-thumb{background:linear-gradient(135deg,#7654da,#0867e8)}
+.news-grid article:nth-child(3) .news-thumb{background:linear-gradient(135deg,#d87800,#f2b73c)}
+.news-body{padding:18px;display:flex;flex-direction:column;gap:8px}
+
+/* Gallery tiles: vary the gradient per tile instead of one flat color */
+.gallery-grid article:nth-child(1){background:linear-gradient(145deg,#0867e8,#1ac4d5)}
+.gallery-grid article:nth-child(2){background:linear-gradient(145deg,#7654da,#0867e8)}
+.gallery-grid article:nth-child(3){background:linear-gradient(145deg,#d87800,#f2b73c)}
+.gallery-grid article:nth-child(4){background:linear-gradient(145deg,#0891b2,#1ac4d5)}
+.gallery-grid article:nth-child(5){background:linear-gradient(145deg,#0867e8,#7654da)}
+.gallery-grid article:nth-child(6){background:linear-gradient(145deg,#18a567,#1ac4d5)}
