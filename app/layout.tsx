@@ -13,16 +13,23 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "EduPlan AI | Trợ lý soạn giảng cho giáo viên Việt Nam",
+  title: "Trung tâm GDNN-GDTX khu vực Tân Ninh",
   description:
-    "Nền tảng dạy và học số cho giáo viên, học sinh và phụ huynh: tạo kế hoạch bài dạy 5512, bài eLearning tương tác, trình chiếu trên lớp, đề kiểm tra và chấm bài bằng AI.",
-  applicationName: "EduPlan AI",
-  keywords: ["EduPlan AI", "giáo án 5512", "eLearning", "soạn giảng AI", "kiểm tra đánh giá", "CTGDPT 2018"],
+    "Website chính thức của Trung tâm Giáo dục nghề nghiệp - Giáo dục thường xuyên khu vực Tân Ninh: giới thiệu, tin tức - sự kiện, tuyển sinh, đào tạo nghề, văn bản và hệ thống học tập trực tuyến EduPlan AI.",
+  applicationName: "GDNN-GDTX Tân Ninh",
+  keywords: [
+    "Trung tâm GDNN-GDTX Tân Ninh",
+    "giáo dục thường xuyên",
+    "giáo dục nghề nghiệp",
+    "tuyển sinh",
+    "đào tạo nghề",
+    "EduPlan AI",
+  ],
   openGraph: {
-    title: "EduPlan AI | Nền tảng dạy và học số",
+    title: "Trung tâm GDNN-GDTX khu vực Tân Ninh",
     description:
-      "Giáo viên soạn giảng bằng AI, học sinh học và nộp bài trực tuyến, nhà trường theo dõi mọi hoạt động trong một nơi duy nhất.",
-    siteName: "EduPlan AI",
+      "Giới thiệu, tin tức, tuyển sinh và đào tạo của Trung tâm; hệ thống học tập trực tuyến EduPlan AI dành cho giáo viên, học viên và phụ huynh.",
+    siteName: "GDNN-GDTX Tân Ninh",
     locale: "vi_VN",
     type: "website",
   },

@@ -1242,22 +1242,75 @@ export default function Home() {
   );
 }
 
+const siteAnnouncements = [
+  { date: "20/08/2026", tag: "Tuyển sinh", title: "Kế hoạch tuyển sinh năm học 2026 - 2027" },
+  { date: "15/08/2026", tag: "Thông báo", title: "Lịch khai giảng năm học mới" },
+  { date: "05/08/2026", tag: "Chuyên môn", title: "Kế hoạch bồi dưỡng chuyên môn hè 2026" },
+  { date: "28/07/2026", tag: "Tuyển sinh", title: "Danh sách học viên trúng tuyển đợt 1" },
+];
+const siteNews = [
+  {
+    tag: "Sự kiện",
+    date: "05/09/2026",
+    title: "Khai giảng năm học 2026 - 2027",
+    excerpt: "Trung tâm tổ chức Lễ khai giảng, chào đón học viên các lớp giáo dục thường xuyên và giáo dục nghề nghiệp.",
+  },
+  {
+    tag: "Hoạt động",
+    date: "18/08/2026",
+    title: "Hội thi thiết bị dạy học tự làm",
+    excerpt: "Giáo viên các tổ chuyên môn tham gia hội thi sáng tạo thiết bị dạy học, ứng dụng công nghệ vào giảng dạy.",
+  },
+  {
+    tag: "Thành tích",
+    date: "02/08/2026",
+    title: "Học viên đạt giải hội thi tay nghề",
+    excerpt: "Học viên lớp nghề của Trung tâm đạt kết quả tốt tại hội thi tay nghề cấp tỉnh năm 2026.",
+  },
+];
+const siteOrgUnits = [
+  { label: "Ban Giám đốc", note: "Chỉ đạo, điều hành chung mọi hoạt động của Trung tâm" },
+  { label: "Tổ Hành chính - Tổng hợp", note: "Văn thư, tài vụ, cơ sở vật chất, công tác học viên" },
+  { label: "Tổ chuyên môn Giáo dục thường xuyên", note: "Giảng dạy chương trình văn hóa THCS, THPT hệ GDTX" },
+  { label: "Tổ chuyên môn Giáo dục nghề nghiệp", note: "Đào tạo trung cấp, sơ cấp nghề, liên kết doanh nghiệp" },
+];
+const sitePrograms = [
+  { code: "TH", name: "Tin học văn phòng" },
+  { code: "ĐT", name: "Điện - Điện tử dân dụng" },
+  { code: "MA", name: "May công nghiệp" },
+  { code: "NA", name: "Kỹ thuật chế biến món ăn" },
+  { code: "XM", name: "Sửa chữa xe máy" },
+  { code: "CS", name: "Chăm sóc sắc đẹp" },
+];
+const siteDocuments = [
+  { type: "Kế hoạch", title: "Kế hoạch tuyển sinh năm học 2026 - 2027" },
+  { type: "Quy chế", title: "Quy chế đánh giá, xếp loại học viên GDTX" },
+  { type: "Biểu mẫu", title: "Đơn đăng ký nhập học" },
+  { type: "Chương trình", title: "Chương trình khung đào tạo nghề" },
+];
+const siteGalleries = ["Lễ khai giảng", "Hoạt động ngoại khóa", "Thực hành nghề", "Cơ sở vật chất", "Hội thi - Hội diễn", "Lễ tốt nghiệp"];
+
 function PublicHome({ registered }: { registered: boolean }) {
   const [authMode, setAuthMode] = useState<"login" | "register" | null>(
     registered ? "register" : null,
   );
   const openAuth = (mode: "login" | "register") => setAuthMode(mode);
+  const scrollTo = (id: string) =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth" });
 
   return (
     <main className="public-site simple-home">
       <header className="simple-nav">
-        <a className="simple-brand" href="#top" aria-label="EduPlan AI - Trang chủ">
-          <span>EP</span>
-          <div><b>EduPlan AI</b><small>Nền tảng dạy và học số</small></div>
+        <a className="simple-brand" href="#top" aria-label="Trung tâm GDNN-GDTX khu vực Tân Ninh - Trang chủ">
+          <span>TN</span>
+          <div><b>GDNN-GDTX Tân Ninh</b><small>Giáo dục nghề nghiệp - Giáo dục thường xuyên</small></div>
         </a>
         <nav aria-label="Điều hướng chính">
-          <a href="#tinh-nang">Dành cho ai?</a>
-          <a href="#bat-dau">Cách sử dụng</a>
+          <a href="#gioi-thieu">Giới thiệu</a>
+          <a href="#tin-tuc">Tin tức</a>
+          <a href="#tuyen-sinh">Tuyển sinh</a>
+          <a href="#van-ban">Văn bản</a>
+          <a href="#lien-he">Liên hệ</a>
         </nav>
         <div className="simple-nav-actions">
           <button className="simple-login" onClick={() => openAuth("login")}>Đăng nhập</button>
@@ -1267,43 +1320,131 @@ function PublicHome({ registered }: { registered: boolean }) {
 
       <section className="simple-hero" id="top">
         <div className="simple-hero-copy">
-          <span className="simple-eyebrow">TRUNG TÂM GDNN-GDTX KHU VỰC TÂN NINH</span>
-          <h1>Dạy học số <em>đơn giản, hiệu quả</em> và dễ sử dụng.</h1>
-          <p>EduPlan AI giúp giáo viên tạo bài giảng, học sinh học và làm bài trực tuyến, nhà trường theo dõi mọi hoạt động trong một nơi duy nhất.</p>
+          <span className="simple-eyebrow">SỞ GIÁO DỤC VÀ ĐÀO TẠO TÂY NINH</span>
+          <h1>Trung tâm GDNN-GDTX <em>khu vực Tân Ninh</em></h1>
+          <p>Đơn vị công lập đào tạo văn hóa hệ giáo dục thường xuyên và giáo dục nghề nghiệp, đồng hành cùng học viên trên hành trình học tập, hướng nghiệp và lập nghiệp.</p>
           <div className="simple-hero-actions">
-            <button className="simple-primary" onClick={() => openAuth("register")}>Đăng ký sử dụng <span>→</span></button>
-            <button className="simple-login" onClick={() => openAuth("login")}>Tôi đã có tài khoản</button>
+            <button className="simple-primary" onClick={() => scrollTo("tuyen-sinh")}>Thông tin tuyển sinh <span>→</span></button>
+            <button className="simple-login" onClick={() => openAuth("login")}>Vào hệ thống học tập</button>
           </div>
-          <div className="simple-trust" aria-label="Ưu điểm nổi bật">
-            <span>✓ Giao diện theo vai trò</span>
-            <span>✓ Lưu tiến độ học tập</span>
-            <span>✓ AI hỗ trợ soạn giảng</span>
+          <div className="simple-trust" aria-label="Lĩnh vực đào tạo">
+            <span>✓ Giáo dục thường xuyên (GDTX)</span>
+            <span>✓ Giáo dục nghề nghiệp (GDNN)</span>
+            <span>✓ Hướng nghiệp - phân luồng</span>
           </div>
         </div>
 
-        <div className="simple-dashboard" aria-label="Minh họa bảng điều khiển EduPlan AI">
-          <div className="simple-dashboard-top"><span>EP</span><b>Bảng điều khiển giáo viên</b><i>●</i></div>
-          <div className="simple-welcome"><div><small>CHÀO BUỔI SÁNG</small><strong>Sẵn sàng cho tiết học hôm nay?</strong></div><span>＋ Tạo nội dung</span></div>
-          <div className="simple-quick-grid">
-            <article><span>▶</span><div><b>Bài học eLearning</b><small>Video và câu hỏi tương tác</small></div></article>
-            <article><span>▣</span><div><b>Trình chiếu trên lớp</b><small>Nội dung giảng dạy trực quan</small></div></article>
-            <article><span>✓</span><div><b>Luyện tập & kiểm tra</b><small>Tạo đề và chấm điểm</small></div></article>
-          </div>
-          <div className="simple-progress"><div><b>Tiến độ học tập</b><small>Chỉ hiển thị dữ liệu hoạt động đã lưu</small></div><strong>Trực tiếp</strong><i><span style={{ width: "100%" }} /></i></div>
+        <div className="simple-dashboard" aria-label="Thông báo mới nhất từ Trung tâm">
+          <div className="simple-dashboard-top"><span>TN</span><b>Thông báo mới nhất</b><i>●</i></div>
+          <ul className="site-ticker">
+            {siteAnnouncements.map((item) => (
+              <li key={item.title}>
+                <em>{item.tag}</em>
+                <p>{item.title}</p>
+                <small>{item.date}</small>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
-      <section className="simple-audience" id="tinh-nang">
-        <div className="simple-section-head"><span>RÕ RÀNG · ĐÚNG NHU CẦU</span><h2>Mỗi người thấy đúng công việc của mình</h2><p>Đăng nhập một lần, hệ thống tự mở giao diện phù hợp với vai trò.</p></div>
+      <section className="site-section" id="gioi-thieu">
+        <div className="simple-section-head">
+          <span>GIỚI THIỆU CHUNG</span>
+          <h2>Trung tâm Giáo dục nghề nghiệp - Giáo dục thường xuyên khu vực Tân Ninh</h2>
+          <p>Trung tâm là đơn vị sự nghiệp công lập trực thuộc Sở Giáo dục và Đào tạo tỉnh Tây Ninh, thực hiện nhiệm vụ giáo dục thường xuyên cấp THCS, THPT và đào tạo nghề, gắn học văn hóa với hướng nghiệp và học nghề cho học viên trên địa bàn.</p>
+        </div>
+        <div className="site-mission-grid">
+          <article><span className="simple-icon blue">✦</span><h3>Sứ mệnh</h3><p>Mang đến cơ hội học tập văn hóa và học nghề cho mọi học viên, không giới hạn độ tuổi hay hoàn cảnh.</p></article>
+          <article><span className="simple-icon violet">◇</span><h3>Tầm nhìn</h3><p>Trở thành địa chỉ giáo dục thường xuyên và đào tạo nghề tin cậy của khu vực Tân Ninh.</p></article>
+          <article><span className="simple-icon orange">✓</span><h3>Giá trị cốt lõi</h3><p>Tận tâm - Chất lượng - Gắn kết thực tiễn - Đồng hành cùng học viên.</p></article>
+        </div>
+        <div className="org-grid" aria-label="Cơ cấu tổ chức">
+          {siteOrgUnits.map((u) => (
+            <article key={u.label}><b>{u.label}</b><p>{u.note}</p></article>
+          ))}
+        </div>
+      </section>
+
+      <section className="site-section site-alt" id="tuyen-sinh">
+        <div className="simple-section-head">
+          <span>TUYỂN SINH - ĐÀO TẠO</span>
+          <h2>Hai hướng học tập song song</h2>
+          <p>Học viên có thể vừa học chương trình văn hóa hệ giáo dục thường xuyên, vừa học thêm một nghề để sớm có việc làm sau khi tốt nghiệp.</p>
+        </div>
+        <div className="admissions-tracks">
+          <article>
+            <b>Giáo dục thường xuyên (GDTX)</b>
+            <p>Chương trình văn hóa cấp THCS và THPT dành cho học viên vừa học vừa làm hoặc không theo học hệ chính quy.</p>
+          </article>
+          <article>
+            <b>Giáo dục nghề nghiệp (GDNN)</b>
+            <p>Đào tạo trình độ sơ cấp, trung cấp nghề, gắn lý thuyết với thực hành và liên kết doanh nghiệp.</p>
+          </article>
+        </div>
+        <div className="program-grid" aria-label="Ngành nghề đào tạo tham khảo">
+          {sitePrograms.map((p) => (
+            <article key={p.name}><span>{p.code}</span><b>{p.name}</b></article>
+          ))}
+        </div>
+        <small className="site-note">Danh mục ngành nghề mang tính tham khảo; Trung tâm cập nhật chỉ tiêu và ngành đào tạo chính thức theo từng năm học.</small>
+      </section>
+
+      <section className="site-section" id="tin-tuc">
+        <div className="simple-section-head">
+          <span>TIN TỨC - SỰ KIỆN</span>
+          <h2>Hoạt động của Trung tâm</h2>
+          <p>Cập nhật tin tức, sự kiện và thành tích của giáo viên, học viên.</p>
+        </div>
+        <div className="news-grid">
+          {siteNews.map((n) => (
+            <article key={n.title}>
+              <em>{n.tag}</em>
+              <h3>{n.title}</h3>
+              <p>{n.excerpt}</p>
+              <small>{n.date}</small>
+            </article>
+          ))}
+        </div>
+        <small className="site-note">Nội dung minh họa - Trung tâm cập nhật tin, bài viết thực tế trong quá trình sử dụng website.</small>
+      </section>
+
+      <section className="site-section site-alt" id="van-ban">
+        <div className="simple-section-head">
+          <span>VĂN BẢN - BIỂU MẪU</span>
+          <h2>Văn bản, kế hoạch và biểu mẫu</h2>
+          <p>Các văn bản chỉ đạo, kế hoạch chuyên môn và biểu mẫu dành cho học viên, phụ huynh.</p>
+        </div>
+        <div className="doc-list">
+          {siteDocuments.map((d) => (
+            <article key={d.title}><span>{d.type}</span><b>{d.title}</b></article>
+          ))}
+        </div>
+      </section>
+
+      <section className="site-section" id="thu-vien-anh">
+        <div className="simple-section-head">
+          <span>THƯ VIỆN ẢNH</span>
+          <h2>Hình ảnh hoạt động</h2>
+        </div>
+        <div className="gallery-grid">
+          {siteGalleries.map((g) => (
+            <article key={g}><span>{g[0]}</span><b>{g}</b></article>
+          ))}
+        </div>
+      </section>
+
+      <section className="simple-audience" id="he-thong">
+        <div className="simple-section-head"><span>HỆ THỐNG HỌC TẬP TRỰC TUYẾN</span><h2>EduPlan AI - dành riêng cho Trung tâm</h2><p>Đăng nhập một lần, hệ thống tự mở giao diện phù hợp với vai trò giáo viên, học viên hoặc phụ huynh.</p></div>
         <div className="simple-audience-grid">
           <article><span className="simple-icon blue">GV</span><h3>Dành cho giáo viên</h3><p>Soạn bài, tạo eLearning, trình chiếu, giao bài và tạo đề kiểm tra.</p><small>Soạn giảng và quản lý lớp học</small></article>
-          <article><span className="simple-icon violet">HS</span><h3>Dành cho học sinh</h3><p>Học video tương tác, làm bài, nộp bài và xem kết quả học tập.</p><small>Học tập chủ động ở mọi nơi</small></article>
-          <article><span className="simple-icon orange">QL</span><h3>Nhà trường & phụ huynh</h3><p>Quản lý tài khoản, theo dõi tiến độ và đồng hành cùng học sinh.</p><small>Thông tin tập trung, dễ theo dõi</small></article>
+          <article><span className="simple-icon violet">HV</span><h3>Dành cho học viên</h3><p>Học video tương tác, làm bài, nộp bài và xem kết quả học tập.</p><small>Học tập chủ động ở mọi nơi</small></article>
+          <article><span className="simple-icon orange">QL</span><h3>Nhà trường & phụ huynh</h3><p>Quản lý tài khoản, theo dõi tiến độ và đồng hành cùng học viên.</p><small>Thông tin tập trung, dễ theo dõi</small></article>
         </div>
       </section>
 
       <section className="simple-how" id="bat-dau">
-        <div className="simple-how-copy"><span>BẮT ĐẦU NHANH</span><h2>Chỉ 3 bước để sử dụng</h2><p>Không cần chờ phê duyệt. Giáo viên, học sinh và phụ huynh có thể đăng ký rồi bắt đầu ngay.</p></div>
+        <div className="simple-how-copy"><span>BẮT ĐẦU NHANH</span><h2>Chỉ 3 bước để sử dụng</h2><p>Không cần chờ phê duyệt. Giáo viên, học viên và phụ huynh có thể đăng ký rồi bắt đầu ngay.</p></div>
         <div className="simple-steps">
           <article><b>01</b><div><h3>Tạo tài khoản</h3><p>Đăng ký bằng tên tài khoản; email không bắt buộc.</p></div></article>
           <article><b>02</b><div><h3>Chọn vai trò</h3><p>Hệ thống hiển thị đúng chức năng dành cho bạn.</p></div></article>
@@ -1311,16 +1452,38 @@ function PublicHome({ registered }: { registered: boolean }) {
         </div>
       </section>
 
+      <section className="site-section site-alt" id="lien-he">
+        <div className="simple-section-head">
+          <span>LIÊN HỆ</span>
+          <h2>Kết nối với Trung tâm</h2>
+        </div>
+        <div className="contact-grid">
+          <article><b>Địa chỉ</b><p>Khu vực Tân Ninh, tỉnh Tây Ninh (đang cập nhật địa chỉ chi tiết)</p></article>
+          <article><b>Điện thoại</b><p>Đang cập nhật</p></article>
+          <article><b>Email</b><p>Đang cập nhật</p></article>
+          <article><b>Giờ làm việc</b><p>Thứ 2 - Thứ 6: 7h30 - 17h00</p></article>
+        </div>
+        <p className="site-note">Cần hỗ trợ hệ thống học tập trực tuyến? Liên hệ quản trị qua Zalo: <a href="https://zalo.me/0965653750" target="_blank" rel="noreferrer">0965653750</a></p>
+      </section>
+
       <section className="simple-final">
-        <div><span>BẮT ĐẦU NGAY HÔM NAY</span><h2>Một nơi đơn giản cho mọi hoạt động dạy và học.</h2></div>
+        <div><span>BẮT ĐẦU NGAY HÔM NAY</span><h2>Một nơi đơn giản cho mọi hoạt động dạy và học của Trung tâm.</h2></div>
         <div><button className="simple-primary" onClick={() => openAuth("register")}>Đăng ký sử dụng →</button><button className="simple-login" onClick={() => openAuth("login")}>Đăng nhập</button></div>
       </section>
 
-      <footer className="simple-footer">
-        <div className="simple-brand"><span>EP</span><div><b>EduPlan AI</b><small>Nền tảng dạy và học số</small></div></div>
+      <footer className="simple-footer site-footer">
+        <div className="simple-brand"><span>TN</span><div><b>GDNN-GDTX Tân Ninh</b><small>Giáo dục nghề nghiệp - Giáo dục thường xuyên</small></div></div>
+        <nav className="site-footer-links" aria-label="Liên kết nhanh">
+          <a href="#gioi-thieu">Giới thiệu</a>
+          <a href="#tin-tuc">Tin tức</a>
+          <a href="#tuyen-sinh">Tuyển sinh</a>
+          <a href="#van-ban">Văn bản</a>
+          <a href="#thu-vien-anh">Thư viện ảnh</a>
+          <a href="#lien-he">Liên hệ</a>
+        </nav>
         <div className="simple-footer-copy">
-          <p>© 2026 EduPlan AI · Nền tảng hỗ trợ giáo dục Việt Nam</p>
-          <strong>Phát triển bởi Thầy: TRẦN QUỐC HOÀNG ANH - TRUNG TÂM GDNN-GDTX KHU VỰC TÂN NINH - ZALO: 0965653750</strong>
+          <p>© 2026 Trung tâm GDNN-GDTX khu vực Tân Ninh · Tỉnh Tây Ninh</p>
+          <strong>Hệ thống học tập trực tuyến EduPlan AI · Phát triển bởi Thầy Trần Quốc Hoàng Anh - ZALO: 0965653750</strong>
         </div>
       </footer>
 
