@@ -45,7 +45,8 @@ Trả về DUY NHẤT JSON object dạng {"questions":[...]} trong đó mỗi ph
 {"type":"true_false","level":"Thông hiểu","question":"Ngữ cảnh chung của câu","statements":[{"text":"ý a","answer":true},{"text":"ý b","answer":false},{"text":"ý c","answer":true},{"text":"ý d","answer":false}],"points":1}
 {"type":"short","level":"Vận dụng","question":"...","answer":"đáp án ngắn","points":0.5}
 {"type":"essay","level":"Vận dụng","question":"...","guide":"hướng dẫn chấm chi tiết","points":2}
-"answer" của choice là chỉ số 0-3 của phương án đúng. Tổng điểm toàn đề bằng 10. Tiếng Việt chuẩn, số liệu chính xác, không lặp câu.`;
+    "answer" của choice là chỉ số 0-3 của phương án đúng. Tổng điểm toàn đề bằng 10. Tiếng Việt chuẩn, số liệu chính xác, không lặp câu.
+Với Toán, Vật lý, Hóa học, Sinh học: mọi công thức phải dùng LaTeX đặt trong \\(...\\); dùng \\[...\\] cho công thức độc lập. Viết đúng phân số, căn, số mũ, chỉ số, vectơ, đơn vị và phương trình phản ứng; không trả công thức dưới dạng ảnh.`;
     const response = await fetch("https://kiraai.vn/api/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
