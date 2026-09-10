@@ -8,7 +8,7 @@ type R2BucketLike = {
   delete: (key: string) => Promise<void>;
 };
 
-const allowedExtensions = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "mp3", "png", "jpg", "jpeg", "webp", "gif"]);
+const allowedExtensions = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "mp3", "png", "jpg", "jpeg", "webp", "gif", "bmp"]);
 const maxBytes = 25 * 1024 * 1024;
 
 async function bucket() {

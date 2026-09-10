@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./toast.css";
 import "./features.css";
+import "./mobile.css";
 
 const beVietnamPro = Be_Vietnam_Pro({
   variable: "--font-vietnamese",
@@ -33,6 +35,12 @@ export const metadata: Metadata = {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

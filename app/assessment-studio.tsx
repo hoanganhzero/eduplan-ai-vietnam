@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { detectQuestions, extractDocxLines } from "./docx-import";
+import { detectQuestions, extractDocxDocument } from "./docx-import";
 import { MatrixBuilder } from "./matrix-builder";
+import { downloadAssessmentVariants } from "./assessment-docx";
+import { QuestionMediaGallery, RichContent, ScienceFormulaToolbar, type QuestionMedia } from "./assessment-rich-content";
 
 type Role = "teacher" | "student";
 type Notice = (message: string, tone?: "success" | "error") => void;
@@ -26,9 +28,10 @@ export type ExamQuestion = {
   answer?: number | string;
   statements?: Array<{ text: string; answer?: boolean }>;
   guide?: string;
+  media?: QuestionMedia[];
   points: number;
 };
-type AssessmentRecord = {
+export type AssessmentRecord = {
   id: string;
   title: string;
   subject: string;
@@ -49,6 +52,28 @@ type AssessmentRecord = {
   shuffleOnline?: boolean;
   antiCheat?: boolean;
 };
+
+async function imageDimensions(file: File) {
+  try { const bitmap = await createImageBitmap(file); const result = { width: bitmap.width, height: bitmap.height }; bitmap.close(); return result; }
+  catch { return {}; }
+}
+
+async function uploadQuestionMedia(file: File, kind: QuestionMedia["kind"] = "image"): Promise<QuestionMedia> {
+  let uploadFile = file;
+  if (file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg")) {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = reject; element.src = url; });
+      const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth || 1200; canvas.height = image.naturalHeight || 800; const context = canvas.getContext("2d"); if (!context) throw new Error("Không thể chuyển hình SVG"); context.drawImage(image, 0, 0);
+      const png = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png", .95)); if (!png) throw new Error("Không thể chuyển hình SVG"); uploadFile = new File([png], `${file.name.replace(/\.svg$/i, "")}.png`, { type: "image/png" });
+    } finally { URL.revokeObjectURL(url); }
+  }
+  const form = new FormData(); form.append("file", uploadFile);
+  const response = await fetch("/api/assignment-files", { method: "POST", body: form });
+  const result = await response.json();
+  if (!response.ok || !result.file) throw new Error(result.error || `Không thể lưu hình ${file.name}`);
+  return { ...result.file, ...await imageDimensions(uploadFile), kind, caption: kind === "chart" ? "Biểu đồ" : kind === "map" ? "Bản đồ" : "" } as QuestionMedia;
+}
 type AssessmentResult = {
   id: string;
   assessmentId: string;
@@ -73,6 +98,9 @@ export function allowedAttempts(record: { attempts?: number; kind: string }) {
 const templates = {
   "Ngữ văn": { time: 90, label: "Tự luận · 10 điểm", file: "Mau-de-Ngu-van.doc", parts: ["Đọc hiểu: 4,0 điểm · ngữ liệu ngoài SGK", "Viết đoạn nghị luận xã hội", "Viết bài nghị luận văn học/xã hội · phần Viết 6,0 điểm"], counts: { choice: 0, trueFalse: 0, short: 0, essay: 5 } },
   "Toán": { time: 90, label: "3 dạng thức", file: "Mau-de-Toan.doc", parts: ["Phần I: Trắc nghiệm nhiều lựa chọn", "Phần II: Đúng/sai, mỗi câu gồm 4 ý", "Phần III: Trả lời ngắn"], counts: { choice: 12, trueFalse: 4, short: 6, essay: 0 } },
+  "Vật lý": { time: 50, label: "Công thức · đồ thị · thí nghiệm", file: "Mau-de-Vat-ly.doc", parts: ["Nhiều lựa chọn 4 phương án", "Đúng/sai theo ngữ cảnh", "Trả lời ngắn có tính toán"], counts: { choice: 18, trueFalse: 4, short: 6, essay: 0 } },
+  "Hóa học": { time: 50, label: "Phương trình · cấu tạo · thí nghiệm", file: "Mau-de-Hoa-hoc.doc", parts: ["Nhiều lựa chọn 4 phương án", "Đúng/sai theo ngữ cảnh", "Trả lời ngắn có tính toán"], counts: { choice: 18, trueFalse: 4, short: 6, essay: 0 } },
+  "Sinh học": { time: 50, label: "Sơ đồ · bảng số liệu · di truyền", file: "Mau-de-Sinh-hoc.doc", parts: ["Nhiều lựa chọn 4 phương án", "Đúng/sai theo ngữ cảnh", "Trả lời ngắn"], counts: { choice: 18, trueFalse: 4, short: 6, essay: 0 } },
   "Ngoại ngữ": { time: 50, label: "40 câu · năng lực ngôn ngữ", file: "Mau-de-Ngoai-ngu.doc", parts: ["Điền từ/cụm từ hoàn thành đoạn văn", "Sắp xếp câu thành đoạn", "Điền câu/cụm từ dài và đọc hiểu sâu"], counts: { choice: 40, trueFalse: 0, short: 0, essay: 0 } },
   "Lịch sử · Địa lý · GDKT&PL": { time: 50, label: "2 dạng thức", file: "Mau-de-KHXH.doc", parts: ["Phần I: Trắc nghiệm nhiều lựa chọn", "Phần II: Đúng/sai, mỗi câu gồm 4 ý", "Kèm đáp án và ma trận mức độ"], counts: { choice: 24, trueFalse: 4, short: 0, essay: 0 } },
   "KHTN · Tin học · Công nghệ": { time: 50, label: "Theo đặc thù môn học", file: "Mau-de-KHTN-Tin-Cong-nghe.doc", parts: ["Nhiều lựa chọn 4 phương án", "Đúng/sai theo nhóm 4 ý", "Trả lời ngắn khi môn học yêu cầu"], counts: { choice: 18, trueFalse: 4, short: 6, essay: 0 } },
@@ -149,85 +177,14 @@ export function gradeExam(questions: ExamQuestion[], answers: Record<string, unk
 
 const typeNames: Record<ExamQuestion["type"], string> = { choice: "Trắc nghiệm", true_false: "Đúng/Sai", short: "Trả lời ngắn", essay: "Tự luận" };
 
-function examHead(header: ExamHeader, subject: string, code: number) {
-  const safe = Object.fromEntries(Object.entries(header).map(([key, value]) => [key, escapeHtml(String(value))])) as Record<keyof ExamHeader, string>;
-  return `<table class="exam-head"><tr><td><div class="authority">${safe.authority}<br>${safe.school}</div><br>--------------------<br><i>(Đề thi có ${String(header.pageCount).padStart(2, "0")} trang)</i></td><td><div class="exam">${safe.examName}<br>NĂM HỌC ${safe.schoolYear}<br>MÔN: ${escapeHtml(subject.toUpperCase())}<br><span class="sub">Thời gian làm bài: ${safe.duration} PHÚT<br>(không kể thời gian phát đề)</span></div></td></tr></table>
-  <table class="student-line"><tr><td>Họ và tên: ............................................................</td><td>Số báo danh: ........</td><td>Mã đề ${code}</td></tr></table>`;
-}
-
-// Sinh tệp Word thật cho một mã đề từ ngân hàng câu hỏi đã duyệt.
-function buildVariantWord(record: AssessmentRecord, code: number, includeKey: boolean) {
-  const header = record.header || { authority: "SỞ GD&ĐT TÂY NINH", school: "TRUNG TÂM GDNN-GDTX KHU VỰC TÂN NINH", examName: record.kind.toUpperCase(), schoolYear: "2025 - 2026", duration: record.time, pageCount: 2 };
-  const questions = record.questions || [];
-  const groups: ExamQuestion["type"][] = ["choice", "true_false", "short", "essay"];
-  const partTitles: Record<ExamQuestion["type"], string> = {
-    choice: "PHẦN I. TRẮC NGHIỆM NHIỀU LỰA CHỌN",
-    true_false: "PHẦN II. TRẮC NGHIỆM ĐÚNG/SAI",
-    short: "PHẦN III. TRẮC NGHIỆM TRẢ LỜI NGẮN",
-    essay: "PHẦN IV. TỰ LUẬN",
-  };
-  const keyRows: string[] = [];
-  let body = "";
-  let number = 0;
-  for (const type of groups) {
-    let group = questions.filter((question) => question.type === type);
-    if (!group.length) continue;
-    if (record.shuffleQuestions !== false) group = seededShuffle(group, code * 31 + groups.indexOf(type));
-    body += `<h2>${partTitles[type]}</h2>`;
-    for (const question of group) {
-      number += 1;
-      body += `<p><b>Câu ${number}.</b> ${escapeHtml(question.question)} <i>(${question.points} điểm)</i></p>`;
-      if (question.type === "choice") {
-        const order = record.shuffleAnswers !== false
-          ? seededShuffle((question.options || []).map((_, index) => index), code * 97 + number)
-          : (question.options || []).map((_, index) => index);
-        order.forEach((optionIndex, position) => {
-          body += `<p style="margin-left:14px">${String.fromCharCode(65 + position)}. ${escapeHtml(question.options?.[optionIndex] || "")}</p>`;
-        });
-        const keyPosition = order.indexOf(Number(question.answer));
-        keyRows.push(`Câu ${number}: ${String.fromCharCode(65 + Math.max(0, keyPosition))}`);
-      } else if (question.type === "true_false") {
-        (question.statements || []).forEach((statement, index) => {
-          body += `<p style="margin-left:14px">${String.fromCharCode(97 + index)}) ${escapeHtml(statement.text)} &nbsp; Đúng / Sai</p>`;
-        });
-        keyRows.push(`Câu ${number}: ${(question.statements || []).map((statement, index) => `${String.fromCharCode(97 + index)}-${statement.answer ? "Đ" : "S"}`).join(", ")}`);
-      } else if (question.type === "short") {
-        body += `<p style="margin-left:14px">Trả lời: .......................................................</p>`;
-        keyRows.push(`Câu ${number}: ${escapeHtml(String(question.answer ?? ""))}`);
-      } else {
-        body += `<p style="margin-left:14px"><i>Học sinh trình bày bài làm vào giấy kiểm tra.</i></p>`;
-        keyRows.push(`Câu ${number}: ${escapeHtml(question.guide || "Chấm theo hướng dẫn")}`);
-      }
-    }
-  }
-  const key = includeKey
-    ? `<h2 style="page-break-before:always">ĐÁP ÁN VÀ HƯỚNG DẪN CHẤM · MÃ ĐỀ ${code}</h2>${keyRows.map((row) => `<p class="answer">${row}</p>`).join("")}`
-    : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><style>
-  body{font-family:"Times New Roman",serif;font-size:13pt;line-height:1.3;color:#111}
-  .exam-head{border-collapse:collapse;width:100%;table-layout:fixed;margin:0 0 14px}.exam-head td{width:50%;border:0;padding:0 10px;text-align:center;vertical-align:top}
-  .exam-head .authority{color:#d00000;font-weight:bold}.exam-head .exam{font-weight:bold}.exam-head .sub{font-style:italic;font-weight:normal}
-  .student-line{border-collapse:collapse;width:100%;table-layout:fixed;margin:0 0 10px}.student-line td{border:0;border-bottom:1.2pt solid #111;padding:3px 4px;font-size:12.5pt}
-  .student-line td:nth-child(3){text-align:right;font-weight:bold}
-  h2{font-size:14pt;margin-top:16px;border-bottom:1px solid #777;padding-bottom:3px}
-  .answer{color:#d00000}
-  </style></head><body>${examHead(header, record.subject, code)}${body}<p style="text-align:center;font-weight:bold;font-style:italic">------ HẾT ------</p>${key}</body></html>`;
-}
-
-function downloadVariants(record: AssessmentRecord, notify: Notice) {
+async function downloadVariants(record: AssessmentRecord, notify: Notice) {
   if (!record.questions?.length) return notify("Đề này chưa có ngân hàng câu hỏi để sinh mã đề", "error");
   const count = Math.min(50, Math.max(1, record.variantCount || 1));
   const first = record.firstCode || 101;
-  for (let index = 0; index < count; index += 1) {
-    const code = first + index;
-    const blob = new Blob(["﻿", buildVariantWord(record, code, record.includeAnswerKey !== false)], { type: "application/msword;charset=utf-8" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `${record.title.replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 50) || "de"}-Ma-${code}.doc`;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  }
-  notify(`Đã tạo ${count} tệp Word mã đề ${first}${count > 1 ? `–${first + count - 1}` : ""}`);
+  try {
+    await downloadAssessmentVariants(record, (message) => notify(message));
+    notify(`Đã tạo ${count} tệp DOCX mã đề ${first}${count > 1 ? `–${first + count - 1}` : ""}, giữ công thức và hình ảnh`);
+  } catch (error) { notify(error instanceof Error ? error.message : "Không thể tạo tệp Word", "error"); }
 }
 
 function buildWordTemplate(subject: Subject, kind: TestKind, header: ExamHeader, firstCode: number) {
@@ -362,19 +319,21 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
     setImportedQuestions(null);
     setImportNote("");
     if (!file) return;
+    setBusy(true);
     try {
-      const lines = await extractDocxLines(file);
-      const detected = detectQuestions(lines);
+      const extracted = await extractDocxDocument(file);
+      const uploadedEntries = await Promise.all(extracted.media.map(async (item) => [item.marker, { ...await uploadQuestionMedia(item.file, item.kind), width: item.width, height: item.height }] as const));
+      const detected = detectQuestions(extracted.lines, Object.fromEntries(uploadedEntries));
       if (!detected.questions.length) {
         setImportNote("Không nhận diện được câu hỏi nào (cần bắt đầu mỗi câu bằng 'Câu 1.', 'Câu 2.'...). Đề vẫn được lưu dưới dạng tệp để in ấn.");
         return;
       }
       setImportedQuestions(detected.questions);
-      setImportNote(`Đã nhận diện ${detected.questions.length} câu hỏi, trong đó ${detected.answered} câu tự bắt được đáp án (chữ đỏ/gạch chân). Hãy duyệt và bổ sung đáp án bên dưới.`);
+      setImportNote(`Đã nhận diện ${detected.questions.length} câu hỏi, ${detected.answered} câu có đáp án, ${extracted.equationCount} công thức và ${uploadedEntries.length} hình/bản đồ/biểu đồ. Hãy duyệt lại bên dưới.`);
       notify(`Đã nhận diện ${detected.questions.length} câu hỏi từ tệp Word`);
     } catch (error) {
       setImportNote(error instanceof Error ? error.message : "Không đọc được tệp Word; đề vẫn được lưu dưới dạng tệp.");
-    }
+    } finally { setBusy(false); }
   };
   // Ngân hàng câu hỏi đang biên tập (AI hoặc nhận diện từ Word) để áp điểm.
   const activeBank = mode === "ai" ? aiQuestions : importedQuestions || [];
@@ -498,7 +457,7 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
   if (matrixOpen) return <MatrixBuilder notify={notify} onExit={() => setMatrixOpen(false)} />;
 
   return <section className="assessment-shell">
-    <div className="assessment-hero"><div><small>ASSESSMENT STUDIO</small><h2>Tạo đề từ mẫu Word hoặc tự động bằng AI</h2><p>Nhập đề Word có sẵn, hoặc dán ngữ liệu bài học để AI tạo ngân hàng câu hỏi thật — sau đó xuất bản cho học sinh làm trực tuyến và tự chấm.</p><div className="assessment-hero-actions"><button onClick={() => setCreating(true)}>＋ Tạo bài mới</button><button className="matrix-open" onClick={() => setMatrixOpen(true)}>▦ Ma trận & đặc tả 7991</button></div></div><div className="assessment-hero-stats"><b>05<small>Mẫu môn học</small></b><b>04<small>Dạng câu hỏi</small></b><b>AI<small>Bám ngữ liệu thật</small></b></div></div>
+    <div className="assessment-hero"><div><small>ASSESSMENT STUDIO</small><h2>Tạo đề từ Word hoặc tự động bằng AI</h2><p>Giữ công thức Toán–Lý–Hóa–Sinh, hình ảnh, bản đồ và biểu đồ khi xuất DOCX hoặc giao học sinh làm trực tuyến.</p><div className="assessment-hero-actions"><button onClick={() => setCreating(true)}>＋ Tạo bài mới</button><button className="matrix-open" onClick={() => setMatrixOpen(true)}>▦ Ma trận & đặc tả 7991</button></div></div><div className="assessment-hero-stats"><b>08<small>Nhóm môn học</small></b><b>04<small>Dạng câu hỏi</small></b><b>∑<small>Công thức & hình</small></b></div></div>
     <div className="assessment-type-row">{(["Luyện tập", "Thường xuyên", "Giữa học kỳ", "Học kỳ"] as TestKind[]).map((item, index) => <article key={item}><span>{["✦", "✓", "◷", "▣"][index]}</span><div><b>{item}</b><small>{index === 0 ? "Không giới hạn lần làm" : index === 1 ? "Đánh giá quá trình" : index === 2 ? "Theo ma trận giữa kỳ" : "Tổng kết học kỳ"}</small></div></article>)}</div>
     <div className="assessment-head"><div><b>Kho đề của tôi</b><small>Quản lý bản nháp, xuất bản trực tuyến và kết quả học sinh</small></div><button onClick={() => setCreating(true)}>＋ Tạo đề</button></div>
     <div className="assessment-grid">{assessments.map((item) => {
@@ -509,7 +468,7 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
             {item.status === "Đã xuất bản"
               ? <button onClick={() => void setStatus(item, "Bản nháp", "Đã thu hồi đề, học sinh không thấy nữa")}>Thu hồi</button>
               : <button className="publish" onClick={() => void setStatus(item, "Đã xuất bản", "Đã xuất bản. Học sinh có thể làm bài trực tuyến")}>Xuất bản</button>}
-            <button onClick={() => downloadVariants(item, notify)}>⇩ {item.variantCount || 1} mã đề</button>
+            <button onClick={() => void downloadVariants(item, notify)}>⇩ {item.variantCount || 1} mã đề DOCX</button>
             <button onClick={() => setResultsFor(item)}>Kết quả ({itemResults.length})</button>
           </> : (item.sourceFile as { url?: string } | undefined)?.url ? <a href={(item.sourceFile as { url: string }).url} target="_blank" rel="noreferrer">⇩ Tệp đề</a> : null}
           <button className="assessment-delete" onClick={() => removeRecord(item)}>Xóa</button>
@@ -528,14 +487,14 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
       <section className="exam-layout-config"><div className="exam-layout-head"><div><b>Tiêu đề và chân trang theo mẫu Word</b><small>Áp dụng cho mẫu tải về và các mã đề Word được sinh ra.</small></div><button onClick={downloadTemplate}>⇩ Tải mẫu có tiêu đề</button></div><div className="exam-layout-grid"><label>Sở / đơn vị quản lý<input value={examHeader.authority} onChange={(event) => setExamHeader({ ...examHeader, authority: event.target.value })} /></label><label>Tên trường / trung tâm<input value={examHeader.school} onChange={(event) => setExamHeader({ ...examHeader, school: event.target.value })} /></label><label>Tên kỳ kiểm tra<input value={examHeader.examName} onChange={(event) => setExamHeader({ ...examHeader, examName: event.target.value })} /></label><label>Năm học<input value={examHeader.schoolYear} onChange={(event) => setExamHeader({ ...examHeader, schoolYear: event.target.value })} /></label><label>Thời gian làm bài (phút)<input type="number" min="5" max="300" value={examHeader.duration} onChange={(event) => setExamHeader({ ...examHeader, duration: Math.max(5, Number(event.target.value)) })} /></label><label>Số trang dự kiến<input type="number" min="1" max="99" value={examHeader.pageCount} onChange={(event) => setExamHeader({ ...examHeader, pageCount: Math.max(1, Number(event.target.value)) })} /></label></div><div className="exam-paper-preview"><div className="paper-heading"><section><b>{examHeader.authority}</b><strong>{examHeader.school}</strong><i>--------------------</i><em>(Đề thi có {String(examHeader.pageCount).padStart(2, "0")} trang)</em></section><section><b>{examHeader.examName}</b><strong>NĂM HỌC {examHeader.schoolYear}</strong><strong>MÔN: {subject.toUpperCase()}</strong><em>Thời gian làm bài: {examHeader.duration} PHÚT<br />(không kể thời gian phát đề)</em></section></div><div className="paper-student-line"><span>Họ và tên: ........................................</span><span>Số báo danh: ........</span><b>Mã đề {firstCode}</b></div><div className="paper-body-sample"><b>I. TRẮC NGHIỆM KHÁCH QUAN</b><span>Câu 1. Nội dung đề được nhập từ Word hoặc AI tạo...</span></div><footer><span>Mã đề {firstCode}</span><span>Trang 1/{examHeader.pageCount}</span></footer></div></section>
       {mode === "manual" ? <div className="assessment-source-panel"><div className="source-panel-head"><div><b>Đưa đề Word lên — không bắt buộc theo mẫu</b><small>Hệ thống tự nhận diện Câu 1., Câu 2..., phương án A/B/C/D, ý a/b/c/d, ĐÁP ÁN: ... Đáp án <u>gạch chân</u>/<em>tô đỏ</em> được bắt tự động.</small></div><button onClick={downloadTemplate}>⇩ Mẫu tham khảo {template.file}</button></div><label className="assessment-drop"><input type="file" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(e) => void importWord(e.target.files?.[0] || null)} /><span>W</span><div><b>Chọn tệp đề Word (.docx)</b><small>{manualFile ? `Đã chọn: ${manualFile.name}` : "Ưu tiên .docx để nhận diện câu hỏi · tối đa 25 MB"}</small></div><em>{manualFile ? "Đổi file" : "Chọn file"}</em></label>
         {importNote && <div className="import-note">{importNote}</div>}
-        {importedQuestions && <QuestionBankEditor questions={importedQuestions} onChange={setImportedQuestions} />}
+        {importedQuestions && <QuestionBankEditor questions={importedQuestions} onChange={setImportedQuestions} notify={notify} />}
         <div className="import-checklist"><b>Lưu ý</b><span>✓ Tệp đề luôn được lưu nguyên bản trên kho tệp để in ấn, phát đề</span><span>✓ Khi đã duyệt đủ đáp án, đề có thể Xuất bản cho học sinh làm trực tuyến và tự chấm</span></div></div> : <div className="assessment-source-panel ai-source">
         <label className="ai-content-input">1. Dán ngữ liệu bài học / chủ đề <small>(bắt buộc · AI chỉ hỏi trong phạm vi nội dung này)</small><textarea rows={7} value={aiContent} onChange={(event) => setAiContent(event.target.value)} placeholder="Dán nội dung SGK, đề cương ôn tập, tóm tắt chủ đề..." /></label>
         <label className="ai-content-input">2. Yêu cầu ma trận / mức độ <small>(tùy chọn)</small><textarea rows={3} value={aiMatrixNote} onChange={(event) => setAiMatrixNote(event.target.value)} placeholder="Ví dụ: 40% nhận biết, 30% thông hiểu, 30% vận dụng; ưu tiên chương II..." /></label>
         <div className="question-config-head"><div><b>3. Cấu hình số câu theo từng dạng</b><small>AI phân bổ nội dung theo ngữ liệu và mức độ yêu cầu.</small></div><strong>{totalQuestions} câu</strong></div>
         <div className="question-count-grid">{countLabels.map(([key, label, note]) => <label key={key}><span><b>{label}</b><small>{note}</small></span><input type="number" min="0" max="100" value={counts[key]} onChange={(e) => setCounts({ ...counts, [key]: Math.max(0, Number(e.target.value)) })} /></label>)}</div>
         <button className="ai-generate" disabled={busy} onClick={() => void generateAi()}>{busy ? "AI đang tạo câu hỏi..." : "✦ Tạo câu hỏi bằng AI"}</button>
-        {aiQuestions.length > 0 && <div className="ai-question-preview"><b>Đã tạo {aiQuestions.length} câu · duyệt nhanh</b>{aiQuestions.slice(0, 50).map((question, index) => <p key={question.id}><i>{index + 1}</i><span>[{typeNames[question.type]} · {question.level} · {question.points}đ]</span> {question.question}</p>)}</div>}
+        {aiQuestions.length > 0 && <QuestionBankEditor questions={aiQuestions} onChange={setAiQuestions} notify={notify} />}
       </div>}
       {activeBank.length > 0 && <section className="type-points-config">
         <div className="online-config-head"><div><b>Cấu hình điểm theo dạng câu hỏi</b><small>Điểm mỗi câu áp cho từng dạng · tổng toàn đề hiện tại: <strong>{bankTotal} điểm</strong></small></div></div>
@@ -565,7 +524,7 @@ function TeacherAssessments({ notify }: { notify: Notice }) {
 }
 
 // Trình duyệt và biên tập ngân hàng câu hỏi (từ tệp Word nhận diện hoặc AI).
-function QuestionBankEditor({ questions, onChange }: { questions: ExamQuestion[]; onChange: (questions: ExamQuestion[]) => void }) {
+function QuestionBankEditor({ questions, onChange, notify }: { questions: ExamQuestion[]; onChange: (questions: ExamQuestion[]) => void; notify: Notice }) {
   const update = (id: string, changes: Partial<ExamQuestion>) => onChange(questions.map((question) => question.id === id ? { ...question, ...changes } : question));
   const remove = (id: string) => onChange(questions.filter((question) => question.id !== id));
   const changeType = (question: ExamQuestion, type: ExamQuestion["type"]) => {
@@ -599,7 +558,10 @@ function QuestionBankEditor({ questions, onChange }: { questions: ExamQuestion[]
         <label>Điểm<input type="number" min="0.1" step="0.25" value={question.points} onChange={(event) => update(question.id, { points: Math.max(0.1, Number(event.target.value) || 0.25) })} /></label>
         <button className="qbe-remove" onClick={() => remove(question.id)} aria-label={`Xóa câu ${index + 1}`}>×</button>
       </header>
-      <textarea rows={2} value={question.question} onChange={(event) => update(question.id, { question: event.target.value })} placeholder="Nội dung câu hỏi..." />
+      <textarea rows={3} value={question.question} onChange={(event) => update(question.id, { question: event.target.value })} placeholder="Nội dung câu hỏi... Có thể dùng công thức dạng \(x^2\)" />
+      <div className="qbe-rich-preview"><small>XEM TRƯỚC</small><RichContent value={question.question || "Nội dung câu hỏi và công thức sẽ hiển thị tại đây"} /></div>
+      <details className="qbe-formula-details"><summary>∑ Chèn ký hiệu/công thức Toán · Lý · Hóa · Sinh</summary><ScienceFormulaToolbar onInsert={(value) => update(question.id, { question: `${question.question}${question.question ? " " : ""}${value}` })} /></details>
+      <QuestionMediaEditor question={question} onChange={(media) => update(question.id, { media })} notify={notify} />
       {question.type === "choice" && <div className="qbe-options">
         {(question.options || []).map((option, optionIndex) => <div key={optionIndex}>
           <button className={question.answer === optionIndex ? "correct" : ""} onClick={() => update(question.id, { answer: optionIndex })} title="Chọn làm đáp án đúng">{String.fromCharCode(65 + optionIndex)}</button>
@@ -624,6 +586,38 @@ function QuestionBankEditor({ questions, onChange }: { questions: ExamQuestion[]
   </div>;
 }
 
+function QuestionMediaEditor({ question, onChange, notify }: { question: ExamQuestion; onChange: (media: QuestionMedia[]) => void; notify: Notice }) {
+  const [kind, setKind] = useState<QuestionMedia["kind"]>("image");
+  const [uploading, setUploading] = useState(false);
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    if ((question.media?.length || 0) + files.length > 6) return notify("Mỗi câu tối đa 6 hình/bản đồ/biểu đồ", "error");
+    setUploading(true);
+    try {
+      const next = await Promise.all(Array.from(files).map((file) => uploadQuestionMedia(file, kind)));
+      onChange([...(question.media || []), ...next]);
+      notify(`Đã lưu ${next.length} hình vào câu hỏi`);
+    } catch (error) { notify(error instanceof Error ? error.message : "Không thể tải hình", "error"); }
+    finally { setUploading(false); }
+  };
+  const remove = async (item: QuestionMedia) => {
+    onChange((question.media || []).filter((media) => media.id !== item.id));
+    if (item.id) await fetch(`/api/assignment-files?id=${encodeURIComponent(item.id)}`, { method: "DELETE" }).catch(() => undefined);
+  };
+  return <div className="qbe-media-editor">
+    <div className="qbe-media-actions">
+      <select value={kind} onChange={(event) => setKind(event.target.value as QuestionMedia["kind"])} aria-label="Loại hình minh họa"><option value="image">Hình ảnh</option><option value="map">Bản đồ</option><option value="chart">Biểu đồ/đồ thị</option><option value="diagram">Sơ đồ/hình vẽ</option></select>
+      <label className={uploading ? "disabled" : ""}>{uploading ? "Đang lưu hình..." : "＋ Tải hình vào câu"}<input disabled={uploading} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple onChange={(event) => void upload(event.target.files)} /></label>
+      <small>Ảnh được lưu thật, đi cùng câu hỏi khi xuất bản và xuất DOCX.</small>
+    </div>
+    {(question.media || []).length > 0 && <div className="qbe-media-list">{(question.media || []).map((item, index) => <article key={item.id}>
+      <img src={item.url} alt={item.alt || item.caption || item.name} />
+      <div><b>{item.kind === "map" ? "Bản đồ" : item.kind === "chart" ? "Biểu đồ" : item.kind === "diagram" ? "Sơ đồ" : "Hình ảnh"} {index + 1}</b><input value={item.caption || ""} onChange={(event) => onChange((question.media || []).map((media) => media.id === item.id ? { ...media, caption: event.target.value, alt: event.target.value } : media))} placeholder="Chú thích hình..." /></div>
+      <button type="button" onClick={() => void remove(item)} aria-label={`Xóa ${item.name}`}>×</button>
+    </article>)}</div>}
+  </div>;
+}
+
 function ResultRow({ result, record, onOverride }: { result: AssessmentResult; record: AssessmentRecord; onOverride: (finalTen: number) => void }) {
   const [override, setOverride] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -644,7 +638,7 @@ function ResultRow({ result, record, onOverride }: { result: AssessmentResult; r
         <button disabled={!validOverride} onClick={() => { onOverride(overrideValue); setOverride(""); }}>Lưu</button>
       </label>
     </div>
-    {expanded && <div className="essay-answers">{essays.map((question, index) => <article key={question.id}><b>Câu tự luận {index + 1} · {question.points} điểm</b><p className="essay-question">{question.question}</p><p className="essay-answer">{String((result.answers || {})[question.id] || "Học sinh chưa trả lời")}</p>{question.guide && <small>Hướng dẫn chấm: {question.guide}</small>}</article>)}</div>}
+    {expanded && <div className="essay-answers">{essays.map((question, index) => <article key={question.id}><b>Câu tự luận {index + 1} · {question.points} điểm</b><p className="essay-question"><RichContent value={question.question} /></p><QuestionMediaGallery media={question.media} /><p className="essay-answer">{String((result.answers || {})[question.id] || "Học sinh chưa trả lời")}</p>{question.guide && <small>Hướng dẫn chấm: {question.guide}</small>}</article>)}</div>}
   </div>;
 }
 
@@ -808,9 +802,10 @@ function ExamRunner({ assessment, notify, accountKey, attempt, onExit }: { asses
     <main>
       {questions.map((question, index) => <article className="exam-question" key={question.id}>
         <div className="exam-question-head"><span>Câu {index + 1}</span><small>{typeNames[question.type]} · {question.level} · {question.points} điểm</small></div>
-        <p>{question.question}</p>
-        {question.type === "choice" && <div className="exam-options">{(optionOrder[question.id] || []).map((originalIndex, position) => <button key={originalIndex} className={Number(answers[question.id]) === originalIndex && answers[question.id] !== undefined ? "selected" : ""} onClick={() => set(question.id, originalIndex)}><span>{String.fromCharCode(65 + position)}</span>{question.options?.[originalIndex]}</button>)}</div>}
-        {question.type === "true_false" && <div className="exam-truefalse">{(question.statements || []).map((statement, statementIndex) => { const picks = Array.isArray(answers[question.id]) ? [...(answers[question.id] as unknown[])] : []; return <div key={statement.text || statementIndex}><b>{String.fromCharCode(97 + statementIndex)})</b><span>{statement.text}</span><div><button className={picks[statementIndex] === true ? "selected" : ""} onClick={() => { picks[statementIndex] = true; set(question.id, picks); }}>Đúng</button><button className={picks[statementIndex] === false ? "selected" : ""} onClick={() => { picks[statementIndex] = false; set(question.id, picks); }}>Sai</button></div></div>; })}</div>}
+        <p><RichContent value={question.question} /></p>
+        <QuestionMediaGallery media={question.media} />
+        {question.type === "choice" && <div className="exam-options">{(optionOrder[question.id] || []).map((originalIndex, position) => <button key={originalIndex} className={Number(answers[question.id]) === originalIndex && answers[question.id] !== undefined ? "selected" : ""} onClick={() => set(question.id, originalIndex)}><span>{String.fromCharCode(65 + position)}</span><RichContent value={question.options?.[originalIndex] || ""} /></button>)}</div>}
+        {question.type === "true_false" && <div className="exam-truefalse">{(question.statements || []).map((statement, statementIndex) => { const picks = Array.isArray(answers[question.id]) ? [...(answers[question.id] as unknown[])] : []; return <div key={statement.text || statementIndex}><b>{String.fromCharCode(97 + statementIndex)})</b><span><RichContent value={statement.text} /></span><div><button className={picks[statementIndex] === true ? "selected" : ""} onClick={() => { picks[statementIndex] = true; set(question.id, picks); }}>Đúng</button><button className={picks[statementIndex] === false ? "selected" : ""} onClick={() => { picks[statementIndex] = false; set(question.id, picks); }}>Sai</button></div></div>; })}</div>}
         {question.type === "short" && <input className="exam-short" value={String(answers[question.id] ?? "")} onChange={(event) => set(question.id, event.target.value)} placeholder="Nhập đáp án ngắn..." />}
         {question.type === "essay" && <textarea className="exam-essay" rows={6} value={String(answers[question.id] ?? "")} onChange={(event) => set(question.id, event.target.value)} placeholder="Trình bày bài làm..." />}
       </article>)}

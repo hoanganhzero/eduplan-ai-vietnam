@@ -49,6 +49,16 @@ export async function serverRpc<T>(action: string, payload: Record<string, unkno
   });
 }
 
+export async function passwordSecurityRpc<T>(action: string, payload: Record<string, unknown> = {}) {
+  const { appSecret } = await runtimeConfig();
+  if (!appSecret) throw new Error("Khóa bảo mật Supabase chưa được cấu hình");
+  return rpc<T>("eduplan_password_security", {
+    p_secret: appSecret,
+    p_action: action,
+    p_payload: payload,
+  });
+}
+
 export async function platformSessionRpc<T>(email: string) {
   const { appSecret } = await runtimeConfig();
   if (!appSecret) throw new Error("Khóa bảo mật Supabase chưa được cấu hình");

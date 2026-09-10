@@ -31,6 +31,9 @@ type ManagedAccount = {
   avatarUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  hasPassword?: boolean;
+  passwordResetRequestedAt?: string | null;
+  passwordChangedAt?: string | null;
 };
 type Modal =
   | "assignment"
@@ -251,6 +254,8 @@ export default function Home() {
   const [session, setSession] = useState<{
     authenticated: boolean;
     account: SessionAccount | null;
+    authSource?: string;
+    passwordResetVerified?: boolean;
   } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accounts, setAccounts] = useState<ManagedAccount[]>([]);
@@ -528,6 +533,42 @@ export default function Home() {
       notify("Đã cập nhật tài khoản");
     } catch (e) {
       notify(e instanceof Error ? e.message : "Không thể cập nhật tài khoản");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const resetAccountPassword = async (accountKey: string, newPassword: string) => {
+    if (newPassword.length < 8) {
+      notify("Mật khẩu mới cần ít nhất 8 ký tự");
+      return false;
+    }
+    if (window.location.hostname === "terminal.local") {
+      setAccounts((list) => list.map((account) =>
+        account.accountKey === accountKey
+          ? { ...account, hasPassword: true, passwordResetRequestedAt: null }
+          : account,
+      ));
+      notify("Đã đặt mật khẩu mới cho tài khoản");
+      return true;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch("/api/accounts/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ accountKey, newPassword }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setAccounts((list) => list.map((account) =>
+        account.accountKey === accountKey ? result.account : account,
+      ));
+      setEditingAccount(result.account);
+      notify("Đã đặt mật khẩu mới; các phiên đăng nhập cũ đã được thu hồi");
+      return true;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Không thể đặt lại mật khẩu");
+      return false;
     } finally {
       setSaving(false);
     }
@@ -1217,15 +1258,17 @@ export default function Home() {
           onLink={(studentKey) => linkParent(editingAccount, studentKey)}
           close={() => setEditingAccount(null)}
           save={saveAccount}
+          resetPassword={resetAccountPassword}
           remove={deleteAccount}
         />
       )}
       {profileOpen && (
         <ProfileModal
           account={session.account}
+          passwordResetVerified={Boolean(session.passwordResetVerified)}
           close={() => setProfileOpen(false)}
           onUpdated={(account) => {
-            setSession({ authenticated: true, account });
+            setSession((current) => ({ ...current!, authenticated: true, account }));
             notify("Đã cập nhật hồ sơ");
           }}
           notify={notify}
@@ -1330,7 +1373,7 @@ function PublicHome({ registered }: { registered: boolean }) {
 }
 
 function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: () => void }) {
-  const [mode, setMode] = useState<"login" | "register">(
+  const [mode, setMode] = useState<"login" | "register" | "forgot">(
     registered ? "register" : "login",
   );
   const [role, setRole] = useState<Exclude<Role, "admin">>("teacher");
@@ -1388,6 +1431,27 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
       setAuthMessage(
         error instanceof Error ? error.message : "Không thể đăng ký",
       );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const submitForgotPassword = async () => {
+    if (!String(form.identifier || "").trim()) {
+      setAuthMessage("Vui lòng nhập tên tài khoản hoặc email");
+      return;
+    }
+    setSubmitting(true);
+    setAuthMessage("");
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identifier: form.identifier }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setAuthMessage(`${result.message} Nếu tài khoản có Gmail, hãy đăng nhập bằng Google để tự tạo mật khẩu mới; nếu không, Admin sẽ hỗ trợ đặt lại.`);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Không thể gửi yêu cầu đặt lại mật khẩu");
     } finally {
       setSubmitting(false);
     }
@@ -1458,7 +1522,7 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
           </div>
           <div className="auth-tabs">
             <button
-              className={mode === "login" ? "active" : ""}
+              className={mode === "login" || mode === "forgot" ? "active" : ""}
               onClick={() => setMode("login")}
             >
               Đăng nhập
@@ -1539,14 +1603,41 @@ function AuthScreen({ registered, onClose }: { registered: boolean; onClose?: ()
                 <small>Không cần đăng ký và không cần tạo mật khẩu.</small>
               </div>
               <div className="auth-help">
+                <button onClick={() => { setMode("forgot"); setAuthMessage(""); }}>
+                  Quên mật khẩu?
+                </button>
+                <span>·</span>
                 <button onClick={() => setMode("register")}>
-                  Tạo tài khoản bằng tên đăng nhập
+                  Tạo tài khoản
                 </button>
                 <span>·</span>
                 <a href="https://zalo.me/0965653750" target="_blank" rel="noreferrer">
                   Liên hệ quản trị
                 </a>
               </div>
+            </div>
+          ) : mode === "forgot" ? (
+            <div className="auth-view forgot-view">
+              <small className="auth-kicker">KHÔI PHỤC TÀI KHOẢN</small>
+              <h2>Quên mật khẩu?</h2>
+              <p>Nhập tên tài khoản hoặc email đã đăng ký. Yêu cầu sẽ được lưu an toàn để Admin hỗ trợ, không làm lộ tài khoản có tồn tại hay không.</p>
+              <label className="auth-field">
+                Tên tài khoản hoặc email
+                <input autoComplete="username" value={form.identifier || ""}
+                  onChange={(e) => field("identifier", e.target.value)}
+                  placeholder="Ví dụ: hoanganh hoặc email@..."
+                  onKeyDown={(e) => { if (e.key === "Enter") submitForgotPassword(); }} />
+              </label>
+              {authMessage && <p className="auth-message forgot-message">{authMessage}</p>}
+              <button className="auth-primary" disabled={submitting} onClick={submitForgotPassword}>
+                {submitting ? "Đang gửi yêu cầu..." : "Gửi yêu cầu đặt lại →"}
+              </button>
+              <button className="auth-secondary google-button" onClick={platformSignIn}>
+                <span>G</span> Đăng nhập bằng Google
+              </button>
+              <button className="auth-back" onClick={() => { setMode("login"); setAuthMessage(""); }}>
+                ← Quay lại đăng nhập
+              </button>
             </div>
           ) : (
             <div className="auth-view register-view">
@@ -1790,11 +1881,13 @@ function Dashboard({
 
 function ProfileModal({
   account,
+  passwordResetVerified,
   close,
   onUpdated,
   notify,
 }: {
   account: SessionAccount;
+  passwordResetVerified: boolean;
   close: () => void;
   onUpdated: (account: SessionAccount) => void;
   notify: (message: string) => void;
@@ -1813,7 +1906,11 @@ function ProfileModal({
   const update = (key: string, value: string) =>
     setDraft((current) => ({ ...current, [key]: value }));
   const save = async () => {
-    if (draft.newPassword !== draft.confirmPassword) {
+    if (tab === "security" && !draft.newPassword) {
+      notify("Vui lòng nhập mật khẩu mới");
+      return;
+    }
+    if (tab === "security" && draft.newPassword !== draft.confirmPassword) {
       notify("Mật khẩu mới và xác nhận chưa khớp");
       return;
     }
@@ -1831,10 +1928,12 @@ function ProfileModal({
     }
     setBusy(true);
     try {
-      const response = await fetch("/api/profile", {
-        method: "PATCH",
+      const response = await fetch(tab === "security" ? "/api/profile/password" : "/api/profile", {
+        method: tab === "security" ? "POST" : "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(tab === "security"
+          ? { currentPassword: draft.currentPassword, newPassword: draft.newPassword }
+          : { name: draft.name, username: draft.username, phone: draft.phone, bio: draft.bio }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
@@ -1960,13 +2059,15 @@ function ProfileModal({
           <div className="security-note">
             <span>⌘</span>
             <div>
-              <b>Mật khẩu được bảo vệ</b>
+              <b>{passwordResetVerified ? "Đã xác minh bằng Google" : "Mật khẩu được bảo vệ"}</b>
               <small>
-                Mật khẩu được mã hóa một chiều và không hiển thị cho bất kỳ ai.
+                {passwordResetVerified
+                  ? "Bạn có thể đặt mật khẩu mới mà không cần nhập mật khẩu cũ."
+                  : "Mật khẩu được mã hóa một chiều và không hiển thị cho bất kỳ ai."}
               </small>
             </div>
           </div>
-          {account.hasPassword && (
+          {account.hasPassword && !passwordResetVerified && (
             <Field label="Mật khẩu hiện tại">
               <input
                 type="password"
@@ -2060,6 +2161,9 @@ function AccountsTable({
                     ? ` · ${account.email}`
                     : " · Không dùng email"}
                 </small>
+                {account.passwordResetRequestedAt && (
+                  <em className="password-request-badge">Yêu cầu đặt lại mật khẩu</em>
+                )}
               </span>
             </span>
             <span>{roleMeta[account.role].label}</span>
@@ -2102,6 +2206,7 @@ function AccountEditModal({
   onLink,
   close,
   save,
+  resetPassword,
   remove,
 }: {
   account: ManagedAccount;
@@ -2111,12 +2216,23 @@ function AccountEditModal({
   onLink: (studentKey: string) => void;
   close: () => void;
   save: (account: ManagedAccount) => void;
+  resetPassword: (accountKey: string, newPassword: string) => Promise<boolean>;
   remove: (accountKey: string) => void;
 }) {
   const [draft, setDraft] = useState(account);
   const [linked, setLinked] = useState(linkedStudentKey);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
   const protectedAccount = account.accountKey === currentKey;
+  const submitPassword = async () => {
+    if (newPassword.length < 8 || newPassword !== confirmPassword) return;
+    setPasswordBusy(true);
+    const updated = await resetPassword(account.accountKey, newPassword);
+    if (updated) { setNewPassword(""); setConfirmPassword(""); }
+    setPasswordBusy(false);
+  };
   return (
     <ModalShell title="Chỉnh sửa tài khoản" close={close}>
       <div className="account-edit-head">
@@ -2196,6 +2312,32 @@ function AccountEditModal({
           Tài khoản Admin đang đăng nhập được bảo vệ: không thể hạ quyền, khóa
           hoặc xóa.
         </p>
+      )}
+      {!protectedAccount && (
+        <section className="admin-password-reset">
+          <div>
+            <b>Đặt lại mật khẩu</b>
+            <small>{account.passwordResetRequestedAt
+              ? `Người dùng đã yêu cầu hỗ trợ lúc ${new Date(account.passwordResetRequestedAt).toLocaleString("vi-VN")}.`
+              : "Admin có thể tạo mật khẩu mới; các phiên đăng nhập cũ của tài khoản sẽ bị thu hồi."}</small>
+          </div>
+          <div className="form-grid">
+            <Field label="Mật khẩu mới">
+              <input type="password" autoComplete="new-password" value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)} placeholder="Tối thiểu 8 ký tự" />
+            </Field>
+            <Field label="Xác nhận mật khẩu">
+              <input type="password" autoComplete="new-password" value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)} />
+            </Field>
+          </div>
+          {confirmPassword && newPassword !== confirmPassword && <p className="field-error">Mật khẩu xác nhận chưa khớp.</p>}
+          <button className="soft password-reset-button"
+            disabled={passwordBusy || newPassword.length < 8 || newPassword !== confirmPassword}
+            onClick={submitPassword}>
+            {passwordBusy ? "Đang đặt lại..." : "Đặt mật khẩu mới"}
+          </button>
+        </section>
       )}
       <div className="account-modal-actions">
         <button className="soft" onClick={close}>
