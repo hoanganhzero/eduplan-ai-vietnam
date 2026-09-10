@@ -17,14 +17,19 @@ export async function GET(request: Request) {
   try {
     const identity = await getRequestAccount(request);
     if (identity?.account) {
+      const platformUser = identity.source === "platform" ? identity.platformUser : await getChatGPTUser();
+      const passwordResetVerified = Boolean(
+        platformUser?.email && identity.account.email &&
+          platformUser.email.toLowerCase() === identity.account.email.toLowerCase(),
+      );
       if (identity.source === "platform") {
         const session = await platformSession(identity.platformUser.email);
         return Response.json(
-          { authenticated: true, account: session.account, authSource: "platform" },
+          { authenticated: true, account: session.account, authSource: "platform", passwordResetVerified },
           { headers: { "Set-Cookie": sessionCookie(session.token, session.expiresAt) } },
         );
       }
-      return Response.json({ authenticated: true, account: identity.account, authSource: identity.source });
+      return Response.json({ authenticated: true, account: identity.account, authSource: identity.source, passwordResetVerified });
     }
 
     const user = identity?.platformUser ?? (await getChatGPTUser());
@@ -34,7 +39,7 @@ export async function GET(request: Request) {
       await serverRpc("platform_upsert", { email: user.email, name: user.displayName, role: "admin" });
       const session = await platformSession(user.email);
       return Response.json(
-        { authenticated: true, account: session.account, authSource: "platform" },
+        { authenticated: true, account: session.account, authSource: "platform", passwordResetVerified: true },
         { headers: { "Set-Cookie": sessionCookie(session.token, session.expiresAt) } },
       );
     }
@@ -57,7 +62,7 @@ export async function POST(request: Request) {
     await serverRpc("platform_upsert", { email: user.email, name: user.displayName, role });
     const session = await platformSession(user.email);
     return Response.json(
-      { authenticated: true, account: session.account, authSource: "platform" },
+      { authenticated: true, account: session.account, authSource: "platform", passwordResetVerified: true },
       { headers: { "Set-Cookie": sessionCookie(session.token, session.expiresAt) } },
     );
   } catch (error) {
