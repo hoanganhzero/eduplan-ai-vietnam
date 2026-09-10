@@ -1,0 +1,729 @@
+/*
+ * Lớp bảo vệ giao diện trên điện thoại.
+ * Tệp này được nạp sau cùng để mọi màn hình chức năng đều có cùng quy tắc:
+ * không tràn khung nhìn, vùng chạm đủ lớn và hộp thoại luôn cuộn được.
+ */
+
+html,
+body {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.portal,
+.portal-body,
+.content,
+.panel,
+.modal-card,
+.assessment-modal > div,
+.assessment-shell,
+.assessment-builder,
+.matrix-shell,
+.lesson-studio,
+.classroom-studio,
+.interactive-author,
+.interactive-player,
+.word-editor-shell,
+.exam-runner,
+.focused-video-player,
+.video-result-page {
+  min-width: 0;
+  max-width: 100%;
+}
+
+img,
+video,
+canvas,
+iframe,
+object {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+.rich-content,
+.assignment-excerpt,
+.notification-list p,
+.lesson-sections,
+.lesson-activities,
+.essay-question,
+.essay-answer,
+.matrix-summary,
+.import-note,
+.qbe-warning {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .data-table,
+  .word-toolbar,
+  .science-toolbar > section,
+  .builder-steps,
+  .video-builder-steps,
+  .editor-topbar nav,
+  .classroom-controls,
+  .web-slide-editor > aside > nav,
+  .formula-block,
+  .exam-paper-preview {
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-backdrop,
+  .assessment-modal,
+  .public-auth-modal,
+  .fullscreen-gate,
+  .question-media-lightbox {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 760px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    font-size: 16px;
+  }
+
+  .topbar {
+    display: grid !important;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    gap: 8px !important;
+    width: 100%;
+    padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 9px max(12px, env(safe-area-inset-left)) !important;
+  }
+
+  .mobile-menu {
+    grid-column: 1;
+    grid-row: 1;
+    order: initial !important;
+  }
+
+  .profile {
+    grid-column: 2;
+    grid-row: 1;
+    order: initial !important;
+    justify-self: end;
+    margin: 0 !important;
+  }
+
+  .bell {
+    grid-column: 3;
+    grid-row: 1;
+    order: initial !important;
+  }
+
+  .top-search {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    order: initial !important;
+    width: 100%;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  .role-identity,
+  .topbar > .logout-button {
+    display: none !important;
+  }
+
+  .portal .sidebar {
+    width: min(320px, 88vw) !important;
+    max-width: calc(100vw - 36px);
+    padding-top: max(18px, env(safe-area-inset-top)) !important;
+    padding-right: max(14px, env(safe-area-inset-right)) !important;
+    padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
+    padding-left: max(14px, env(safe-area-inset-left)) !important;
+  }
+
+  .portal .sidebar nav {
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-sidebar-close {
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .content {
+    width: 100%;
+    padding-right: max(12px, env(safe-area-inset-right)) !important;
+    padding-bottom: max(40px, env(safe-area-inset-bottom)) !important;
+    padding-left: max(12px, env(safe-area-inset-left)) !important;
+  }
+
+  .page-head,
+  .toolbar,
+  .assessment-head,
+  .learning-section-head,
+  .source-panel-head,
+  .question-config-head,
+  .exam-layout-head,
+  .variant-config-head,
+  .checkpoint-step-head,
+  .profile-editor-head,
+  .account-edit-head,
+  .matrix-header,
+  .qbe-head {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 10px;
+  }
+
+  .page-head > div,
+  .panel-head > div,
+  .toolbar > div,
+  .assessment-head > div,
+  .learning-section-head > div {
+    min-width: 0;
+  }
+
+  .head-actions,
+  .lesson-result-actions,
+  .class-qr-actions,
+  .type-points-actions,
+  .qbe-row-actions,
+  .review-summary footer,
+  .video-result-page > footer {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .head-actions > *,
+  .lesson-result-actions > *,
+  .class-qr-actions > *,
+  .type-points-actions > *,
+  .qbe-row-actions > *,
+  .review-summary footer > *,
+  .video-result-page > footer > * {
+    width: 100%;
+  }
+
+  .metrics,
+  .dashboard-grid,
+  .settings-layout,
+  .ai-layout,
+  .results-grid,
+  .attendance-grid,
+  .message-layout,
+  .class-grid,
+  .resource-grid,
+  .moderation-grid,
+  .teacher-lesson-grid,
+  .student-lesson-grid,
+  .classroom-capabilities,
+  .classroom-deck-grid,
+  .assessment-hero-stats,
+  .assessment-type-row,
+  .assessment-grid,
+  .assessment-form,
+  .creation-mode,
+  .assignment-basic-grid,
+  .assignment-files,
+  .composer-fields,
+  .lesson-form,
+  .source-fields,
+  .video-info-fields,
+  .ai-input-grid,
+  .question-count-grid,
+  .word-answer-rules,
+  .exam-layout-grid,
+  .variant-mode,
+  .matrix-info-grid,
+  .matrix-requirements,
+  .type-points-grid,
+  .online-config-grid,
+  .narration-grid,
+  .interactive-workflow,
+  .review-summary > div {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .assessment-form .wide,
+  .assignment-basic-grid .wide,
+  .composer-fields .wide,
+  .lesson-form .wide,
+  .source-fields .wide,
+  .video-info-fields .wide {
+    grid-column: auto !important;
+  }
+
+  .modal-backdrop,
+  .assessment-modal,
+  .public-auth-modal {
+    align-items: end !important;
+    padding: max(8px, env(safe-area-inset-top)) 0 0 !important;
+  }
+
+  .modal-card,
+  .assessment-modal > div,
+  .public-auth-modal .auth-page {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - max(8px, env(safe-area-inset-top))) !important;
+    margin: 0 !important;
+    border-radius: 18px 18px 0 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding-right: max(14px, env(safe-area-inset-right)) !important;
+    padding-bottom: max(24px, env(safe-area-inset-bottom)) !important;
+    padding-left: max(14px, env(safe-area-inset-left)) !important;
+  }
+
+  .question-bank-editor {
+    max-height: none;
+    overflow: visible;
+    padding: 10px;
+  }
+
+  .modal-close,
+  .assessment-close,
+  .auth-modal-close {
+    position: sticky !important;
+    z-index: 5;
+    top: 4px !important;
+    float: right;
+    width: 44px !important;
+    height: 44px !important;
+  }
+
+  .modal-card input,
+  .modal-card select,
+  .modal-card textarea,
+  .assessment-modal input,
+  .assessment-modal select,
+  .assessment-modal textarea,
+  .auth-card input,
+  .auth-card select,
+  .auth-card textarea,
+  .join-class-form input,
+  .chat-compose textarea,
+  .word-page {
+    font-size: 16px !important;
+  }
+
+  .primary,
+  .soft,
+  .publish,
+  .assessment-create,
+  .ai-generate,
+  .join-class-form button,
+  .chat-compose button,
+  .assessment-card-actions button,
+  .assessment-card-actions a,
+  .matrix-header button,
+  .matrix-ai button,
+  .qbe-add button,
+  .qbe-media-actions label,
+  .assessment-formula-tools button {
+    min-height: 44px;
+  }
+
+  .assessment-card-actions > * {
+    flex: 1 1 calc(50% - 7px);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .assessment-hero,
+  .elearning-hero,
+  .classroom-hero,
+  .video-studio-hero,
+  .student-video-hero,
+  .ai-hero {
+    min-height: 0 !important;
+    padding: 24px 18px !important;
+  }
+
+  .dashboard-hero-copy {
+    padding-right: 18px !important;
+    padding-left: 18px !important;
+  }
+
+  .assessment-hero h2,
+  .elearning-hero h2,
+  .classroom-hero h2,
+  .video-studio-hero h2,
+  .student-video-hero h2,
+  .ai-hero h2 {
+    font-size: clamp(24px, 8vw, 31px) !important;
+    overflow-wrap: anywhere;
+  }
+
+  .assessment-hero p,
+  .elearning-hero p,
+  .classroom-hero p,
+  .video-studio-hero p,
+  .student-video-hero p,
+  .ai-hero p {
+    font-size: 13px !important;
+    line-height: 1.65;
+  }
+
+  .assessment-hero-actions,
+  .classroom-controls,
+  .shuffle-options,
+  .gamma-status,
+  .document-upload-zone,
+  .setting-row,
+  .service-check,
+  .notification-list article,
+  .lesson-plan-row,
+  .attendance-log .attendance-row {
+    align-items: stretch !important;
+    flex-wrap: wrap;
+  }
+
+  .assessment-hero-actions > *,
+  .classroom-controls > *,
+  .gamma-status a,
+  .document-upload-zone > label {
+    flex: 1 1 150px;
+    text-align: center;
+  }
+
+  .exam-runner > header {
+    position: static !important;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 13px;
+  }
+
+  .exam-runner > header > button:first-child {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .exam-runner > main {
+    padding: 12px;
+  }
+
+  .exam-question {
+    min-width: 0;
+    padding: 13px 11px;
+  }
+
+  .exam-question > p,
+  .exam-options button,
+  .exam-truefalse > div,
+  .exam-short,
+  .exam-essay {
+    font-size: 14px !important;
+    line-height: 1.6;
+  }
+
+  .exam-options button {
+    min-height: 48px;
+  }
+
+  .exam-truefalse > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .exam-truefalse > div > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .exam-truefalse > div > div button {
+    min-height: 44px;
+  }
+
+  .exam-runner > footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 13px;
+  }
+
+  .exam-runner > footer .publish {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .matrix-header nav,
+  .classroom-builder > header nav,
+  .video-builder > header nav,
+  .editor-topbar > div:last-child {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    width: 100%;
+  }
+
+  .matrix-header nav button,
+  .classroom-builder > header nav button,
+  .video-builder > header nav button,
+  .editor-topbar > div:last-child button {
+    width: 100%;
+  }
+
+  .matrix-content-head,
+  .matrix-counts > div,
+  .question-bank-editor article > header,
+  .qbe-options > div,
+  .qbe-statements > div,
+  .score-override {
+    align-items: stretch !important;
+    flex-wrap: wrap;
+  }
+
+  .matrix-content-head input,
+  .question-bank-editor article > header > select,
+  .question-bank-editor article > header > label,
+  .score-override input {
+    flex: 1 1 140px;
+    width: auto;
+  }
+
+  .qbe-media-list article {
+    grid-template-columns: 64px minmax(0, 1fr) 44px !important;
+  }
+
+  .qbe-media-list article > button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .question-media-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .question-media-grid img {
+    max-height: 60dvh;
+  }
+
+  .question-media-lightbox {
+    padding: max(58px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .question-media-close {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    width: 48px;
+    height: 48px;
+  }
+
+  .word-page {
+    width: 100% !important;
+    min-height: 240px;
+    margin: 0 !important;
+    padding: 20px 14px !important;
+  }
+
+  .exam-paper-preview {
+    width: 100%;
+    padding: 16px 12px;
+  }
+
+  .paper-heading,
+  .paper-student-line {
+    overflow-wrap: anywhere;
+  }
+
+  .web-deck {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+  }
+
+  .web-deck > header,
+  .web-deck > footer {
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+  }
+
+  .web-deck > header {
+    padding-top: max(9px, env(safe-area-inset-top));
+    padding-bottom: 9px;
+  }
+
+  .web-deck > footer {
+    padding-top: 9px;
+    padding-bottom: max(9px, env(safe-area-inset-bottom));
+  }
+
+  .web-deck > main {
+    min-height: 0;
+    padding: 24px 16px;
+  }
+
+  .web-deck h1 {
+    font-size: clamp(28px, 10vw, 44px);
+  }
+
+  .web-deck > main > p,
+  .deck-activity > button,
+  .mindmap span {
+    font-size: 16px;
+  }
+
+  .toast {
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: max(10px, env(safe-area-inset-left));
+    width: auto;
+    max-width: none;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 430px) {
+  .content {
+    padding-right: max(10px, env(safe-area-inset-right)) !important;
+    padding-left: max(10px, env(safe-area-inset-left)) !important;
+  }
+
+  .page-head h1 {
+    font-size: 23px !important;
+  }
+
+  .dashboard-hero-copy {
+    padding-bottom: 165px !important;
+  }
+
+  .class-info > div:last-child,
+  .join-class-form,
+  .chat-compose,
+  .lesson-plan-row,
+  .notification-list article,
+  .attendance-log .attendance-row,
+  .admin-password-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .class-info > div:last-child > *,
+  .join-class-form > *,
+  .chat-compose > button,
+  .lesson-plan-row > button,
+  .notification-list article > button,
+  .admin-password-banner > button {
+    width: 100%;
+  }
+
+  .assessment-card-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .qbe-media-list article {
+    grid-template-columns: 1fr 44px !important;
+  }
+
+  .qbe-media-list img {
+    grid-column: 1 / -1;
+    width: 100% !important;
+    height: 120px !important;
+  }
+
+  .matrix-counts > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .matrix-counts > div > b {
+    grid-column: 1 / -1;
+  }
+
+  .matrix-counts label,
+  .matrix-counts input {
+    width: 100%;
+  }
+
+  .exam-runner > header {
+    grid-template-columns: 1fr;
+  }
+
+  .exam-timer {
+    justify-self: stretch;
+    text-align: center;
+  }
+
+  .paper-student-line,
+  .child-stats {
+    grid-template-columns: 1fr !important;
+  }
+
+  .paper-student-line b {
+    grid-column: auto !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    padding-right: 8px !important;
+    padding-left: 8px !important;
+  }
+
+  .simple-nav {
+    padding-right: 10px !important;
+    padding-left: 10px !important;
+  }
+
+  .simple-brand > div b {
+    font-size: 11px !important;
+  }
+
+  .simple-nav-actions .simple-primary {
+    padding-inline: 10px !important;
+  }
+
+  .simple-hero h1 {
+    font-size: 29px !important;
+  }
+
+  .modal-card,
+  .assessment-modal > div,
+  .auth-card {
+    padding-right: 12px !important;
+    padding-left: 12px !important;
+  }
+}
+
+@media (max-width: 760px) and (max-height: 520px) and (orientation: landscape) {
+  .portal .sidebar {
+    width: min(360px, 72vw) !important;
+  }
+
+  .modal-card,
+  .assessment-modal > div,
+  .public-auth-modal .auth-page,
+  .fullscreen-gate > div {
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+
+  .dashboard-hero-copy {
+    padding-bottom: 90px !important;
+  }
+
+  .question-media-grid img,
+  .question-media-lightbox img {
+    max-height: 70dvh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .portal .sidebar {
+    transition: none !important;
+  }
+}
