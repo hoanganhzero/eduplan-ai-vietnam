@@ -15,6 +15,8 @@ export type Account = {
   avatarUrl: string | null;
   phone: string | null;
   bio: string | null;
+  passwordResetRequestedAt: string | null;
+  passwordChangedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
