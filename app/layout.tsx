@@ -1,3 +1,4 @@
+import PwaRegister from "./pwa-register";
 import type { Metadata, Viewport } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
 import "katex/dist/katex.min.css";
@@ -15,6 +16,8 @@ const beVietnamPro = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
+  applicationName: "EduPlan AI",
+  manifest: "/manifest.webmanifest",
   title: "EduPlan AI | Trợ lý soạn giảng cho giáo viên Việt Nam",
   description:
     "Nền tảng dạy và học số cho giáo viên, học sinh và phụ huynh: tạo kế hoạch bài dạy 5512, bài eLearning tương tác, trình chiếu trên lớp, đề kiểm tra và chấm bài bằng AI.",
@@ -51,6 +54,7 @@ export default function RootLayout({
   return (
     <html lang="vi">
       <body className={`${beVietnamPro.variable} antialiased`}>
+        <PwaRegister />
         {children}
       </body>
     </html>
