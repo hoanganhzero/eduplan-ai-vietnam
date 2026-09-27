@@ -2,7 +2,7 @@ const CACHE_NAME = "pwa-eduplan-ai-vietnam-v1";
 const OFFLINE_URL = "/offline.html";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL, "/pwa-icon.svg"])));
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll([OFFLINE_URL, "/pwa-icon.svg", "/icons/icon-192.png"])));
   self.skipWaiting();
 });
 
