@@ -1,0 +1,44 @@
+/*
+ * Vietnamese typography layer.
+ *
+ * Be Vietnam Pro is bundled by next/font with the Vietnamese subset, so the
+ * interface does not depend on a visitor having a particular system font.
+ * Document previews, source code and KaTeX keep their specialist typefaces.
+ */
+:root {
+  --font-ui-vietnamese: var(--font-vietnamese), "Be Vietnam Pro", "Segoe UI", Arial, sans-serif;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea,
+optgroup,
+option {
+  font-family: var(--font-ui-vietnamese);
+}
+
+:where(body, body *):not(.katex):not(.katex *):not(code):not(pre):not(.exam-paper-preview):not(.exam-paper-preview *) {
+  font-family: var(--font-ui-vietnamese) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  font-family: inherit;
+}
+
+code,
+pre,
+kbd,
+samp,
+.bulk-import-rules code,
+.bulk-credential-table code {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace !important;
+}
+
+.exam-paper-preview,
+.exam-paper-preview * {
+  font-family: "Times New Roman", Times, serif !important;
+}

@@ -5,6 +5,7 @@ import "./globals.css";
 import "./toast.css";
 import "./features.css";
 import "./mobile.css";
+import "./typography.css";
 
 const beVietnamPro = Be_Vietnam_Pro({
   variable: "--font-vietnamese",
