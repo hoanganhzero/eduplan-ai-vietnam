@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { SUBJECTS } from "./subjects";
 
 export type AssignmentAttachment = { id: string; name: string; type: string; size: number; url: string };
 
@@ -15,13 +16,13 @@ function fileSize(bytes: number) {
 }
 
 export function AssignmentComposer({ classes, assignments = [], onSubmit, mode = "assign" }: {
-  classes: Array<{ id: number; name: string; subject: string }>;
+  classes: Array<{ id: number; name: string; subject: string; teacherSubjects?: string[] }>;
   assignments?: Array<{ id: number; title: string; subject: string; className: string }>;
   onSubmit: (payload: Record<string, string>) => void;
   mode?: "assign" | "submit";
 }) {
   const editorRef = useRef<HTMLDivElement>(null);
-  const [payload, setPayload] = useState<Record<string, string>>({ className: classes[0]?.name || "", subject: classes[0]?.subject || "", assignmentId: assignments[0] ? String(assignments[0].id) : "" });
+  const [payload, setPayload] = useState<Record<string, string>>({ className: classes[0]?.name || "", subject: classes[0]?.teacherSubjects?.[0] || classes[0]?.subject || "", assignmentId: assignments[0] ? String(assignments[0].id) : "" });
   const [attachments, setAttachments] = useState<AssignmentAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState("");
@@ -62,8 +63,8 @@ export function AssignmentComposer({ classes, assignments = [], onSubmit, mode =
   return <div className="assignment-composer">
     {mode === "assign" ? <div className="assignment-basic-grid">
       <label className="wide">Tên bài tập<input value={payload.name || ""} onChange={(event) => set("name", event.target.value)} placeholder="Ví dụ: Bài tập ôn tập chương II" /></label>
-      <label>Lớp<select value={payload.className} onChange={(event) => { const selected = classes.find((item) => item.name === event.target.value); set("className", event.target.value); if (selected) set("subject", selected.subject); }}>{classes.map((item) => <option key={item.id}>{item.name}</option>)}</select></label>
-      <label>Môn học<input value={payload.subject || ""} onChange={(event) => set("subject", event.target.value)} /></label>
+      <label>Lớp<select value={payload.className} onChange={(event) => { const selected = classes.find((item) => item.name === event.target.value); set("className", event.target.value); if (selected) set("subject", selected.teacherSubjects?.[0] || selected.subject); }}>{classes.map((item) => <option key={item.id}>{item.name}</option>)}</select></label>
+      <label>Môn học<select value={payload.subject || ""} onChange={(event) => set("subject", event.target.value)}><option value="">Chọn môn học</option>{SUBJECTS.map((subject) => <option key={subject}>{subject}</option>)}</select></label>
       <label>Hạn nộp<input type="datetime-local" onChange={(event) => set("due", event.target.value)} /></label>
       <label>Thang điểm<select onChange={(event) => set("maxScore", event.target.value)}><option value="10">10 điểm</option><option value="100">100 điểm</option><option value="pass">Đạt / Chưa đạt</option></select></label>
     </div> : <><div className="submission-intro"><span>✎</span><div><b>Nộp bài trực tuyến</b><small>Em có thể tải bài làm hoặc soạn trực tiếp bên dưới</small></div></div><label className="submission-assignment-select">Bài tập cần nộp<select value={payload.assignmentId} onChange={(event) => set("assignmentId", event.target.value)}><option value="">Chọn bài tập</option>{assignments.map((assignment) => <option key={assignment.id} value={String(assignment.id)}>{assignment.title} · {assignment.className}</option>)}</select></label></>}

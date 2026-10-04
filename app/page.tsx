@@ -7,6 +7,7 @@ import { ClassroomPresentationStudio } from "./classroom-presentation";
 import { AssignmentComposer, type AssignmentAttachment } from "./assignment-composer";
 import { AssessmentStudio } from "./assessment-studio";
 import { LessonAiStudio } from "./lesson-studio";
+import { SUBJECTS } from "./subjects";
 
 type Role = "admin" | "teacher" | "student" | "parent";
 type SessionAccount = {
@@ -34,6 +35,10 @@ type ManagedAccount = {
   hasPassword?: boolean;
   passwordResetRequestedAt?: string | null;
   passwordChangedAt?: string | null;
+  studentCode?: string | null;
+  gender?: string | null;
+  dateOfBirth?: string | null;
+  ethnicity?: string | null;
 };
 type Modal =
   | "assignment"
@@ -43,6 +48,7 @@ type Modal =
   | "process"
   | null;
 type ClassMember = { key: string; name: string; joinedAt?: string };
+type SubjectTeacher = { subject: string; teacherKey: string; teacherName: string; teacherUsername?: string };
 type WorkspaceMessage = {
   id: string;
   fromKey: string;
@@ -106,6 +112,12 @@ type Workspace = {
     progress: number;
     ownerKey?: string;
     ownerName?: string;
+    grade?: string;
+    homeroomTeacherKey?: string;
+    homeroomTeacherName?: string;
+    homeroomTeacherUsername?: string;
+    subjectTeachers?: SubjectTeacher[];
+    teacherSubjects?: string[];
     members?: ClassMember[];
   }[];
   notifications: {
@@ -266,6 +278,8 @@ export default function Home() {
   const [attendanceClass, setAttendanceClass] = useState<Workspace["classes"][number] | null>(null);
   const [qrClass, setQrClass] = useState<Workspace["classes"][number] | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkClassImportOpen, setBulkClassImportOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [services, setServices] = useState<Record<string, boolean>>({});
   const notify = useCallback((message: string, tone?: "success" | "error") => {
@@ -427,9 +441,15 @@ export default function Home() {
   );
   const me = session?.account?.accountKey || "";
   const query = search.trim().toLowerCase();
-  const myClasses =
-    role === "student"
-      ? data.classes.filter((c) => c.members?.some((m) => m.key === me))
+  const myClasses = role === "student"
+    ? data.classes.filter((c) => c.members?.some((m) => m.key === me))
+    : role === "teacher"
+      ? data.classes
+          .filter((c) => c.ownerKey === me || c.homeroomTeacherKey === me || c.subjectTeachers?.some((teacher) => teacher.teacherKey === me))
+          .map((c) => {
+            const teacherSubjects = (c.subjectTeachers || []).filter((teacher) => teacher.teacherKey === me).map((teacher) => teacher.subject);
+            return { ...c, teacherSubjects, subject: teacherSubjects.join(" · ") || c.subject || "Chủ nhiệm" };
+          })
       : data.classes;
   const childLink = role === "parent" ? data.parentLinks[me] : undefined;
   const childKey = childLink?.studentKey || "";
@@ -437,8 +457,9 @@ export default function Home() {
     ? data.classes.filter((c) => c.members?.some((m) => m.key === childKey))
     : [];
   const scopeClassNames = new Set(myClasses.map((c) => c.name));
-  const scopedAssignments =
-    role === "student"
+  const scopedAssignments = role === "student"
+    ? data.assignments.filter((a) => scopeClassNames.has(a.className) || a.className === "Chưa gán lớp")
+    : role === "teacher"
       ? data.assignments.filter((a) => scopeClassNames.has(a.className) || a.className === "Chưa gán lớp")
       : data.assignments;
   const visibleClasses = query
@@ -487,7 +508,7 @@ export default function Home() {
         ]
       : role === "teacher"
         ? [
-            ["Lớp phụ trách", data.classes.length, `${data.classes.reduce((sum, item) => sum + item.students, 0)} học sinh`],
+            ["Lớp phụ trách", myClasses.length, `${myClasses.reduce((sum, item) => sum + (item.members?.length ?? item.students), 0)} lượt học sinh`],
             ["Bài cần chấm", data.submissionRecords.filter((item) => item.status === "Đã nộp").length, "Theo bài nộp thật"],
             ["Bài tập đã giao", data.assignments.length, "Đồng bộ Supabase"],
             ["Thông báo mới", unreadNotifications, "Chưa đọc"],
@@ -742,11 +763,14 @@ export default function Home() {
       childClasses.forEach((c) => {
         if (c.ownerKey && c.ownerKey !== me)
           map.set(c.ownerKey, { key: c.ownerKey, name: c.ownerName || "Giáo viên", note: `GV lớp ${c.name}` });
+        (c.subjectTeachers || []).forEach((teacher) => {
+          if (teacher.teacherKey !== me) map.set(teacher.teacherKey, { key: teacher.teacherKey, name: teacher.teacherName, note: `${teacher.subject} · lớp ${c.name}` });
+        });
       });
     if (role === "teacher" || role === "admin")
       Object.entries(data.parentLinks).forEach(([parentKey, link]) => {
         const related = data.classes.some(
-          (c) => (role === "admin" || c.ownerKey === me) && c.members?.some((m) => m.key === link.studentKey),
+          (c) => (role === "admin" || c.ownerKey === me || c.homeroomTeacherKey === me || c.subjectTeachers?.some((teacher) => teacher.teacherKey === me)) && c.members?.some((m) => m.key === link.studentKey),
         );
         if (related && parentKey !== me)
           map.set(parentKey, { key: parentKey, name: link.parentName || "Phụ huynh", note: `PH em ${link.studentName}` });
@@ -948,12 +972,13 @@ export default function Home() {
                 </button>
               )}
               {role === "admin" && view === "Người dùng" && (
-                <button
-                  className="primary"
-                  onClick={() => setModal("register")}
-                >
-                  ＋ Thêm tài khoản
-                </button>
+                <>
+                  <button className="soft" onClick={() => setBulkImportOpen(true)}>⇧ Nhập học sinh từ Excel</button>
+                  <button className="primary" onClick={() => setModal("register")}>＋ Thêm tài khoản</button>
+                </>
+              )}
+              {role === "admin" && view === "Lớp học" && (
+                <button className="primary" onClick={() => setBulkClassImportOpen(true)}>⇧ Tạo lớp hàng loạt</button>
               )}
             </div>
           </div>
@@ -1233,6 +1258,33 @@ export default function Home() {
         />
       )}
       {qrClass && <ClassQrModal classInfo={qrClass} close={() => setQrClass(null)} notify={notify} />}
+      {bulkImportOpen && (
+        <BulkStudentImportModal
+          close={() => setBulkImportOpen(false)}
+          notify={notify}
+          onImported={async () => {
+            const [accountsResponse, workspaceResponse] = await Promise.all([fetch("/api/accounts"), fetch("/api/workspace")]);
+            const accountsResult = await accountsResponse.json();
+            const workspaceResult = await workspaceResponse.json();
+            if (!accountsResponse.ok) throw new Error(accountsResult.error || "Không thể tải lại tài khoản");
+            if (!workspaceResponse.ok) throw new Error(workspaceResult.error || "Không thể tải lại liên kết phụ huynh");
+            setAccounts(accountsResult.accounts || []);
+            setData(normalizeWorkspace(workspaceResult.data));
+          }}
+        />
+      )}
+      {bulkClassImportOpen && (
+        <BulkClassImportModal
+          close={() => setBulkClassImportOpen(false)}
+          notify={notify}
+          onImported={async () => {
+            const response = await fetch("/api/workspace");
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Không thể tải lại lớp học");
+            setData(normalizeWorkspace(result.data));
+          }}
+        />
+      )}
       {attendanceClass && (
         <AttendanceModal
           classInfo={attendanceClass}
@@ -2112,6 +2164,160 @@ function ProfileModal({
   );
 }
 
+type BulkImportCredential = {
+  rowNumber: number;
+  studentCode: string;
+  studentName: string;
+  studentUsername: string;
+  parentName: string;
+  parentUsername: string;
+  password: string;
+};
+
+function BulkStudentImportModal({ close, notify, onImported }: {
+  close: () => void;
+  notify: (message: string, tone?: "success" | "error") => void;
+  onImported: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{
+    createdStudents: number;
+    createdParents: number;
+    credentials: BulkImportCredential[];
+    errors: Array<{ rowNumber: number; message: string }>;
+  } | null>(null);
+
+  const submit = async () => {
+    if (!file) return notify("Vui lòng chọn tệp Excel .xlsx", "error");
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/accounts/bulk", { method: "POST", body: form });
+      const payload = await response.json();
+      if (!response.ok) {
+        if (Array.isArray(payload.errors)) setResult(payload);
+        throw new Error(payload.error || "Không thể nhập danh sách học sinh");
+      }
+      setResult(payload);
+      await onImported();
+      notify(`Đã tạo ${payload.createdStudents} học sinh và ${payload.createdParents} phụ huynh`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Không thể nhập danh sách học sinh", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadCredentials = () => {
+    if (!result?.credentials.length) return;
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["Mã học sinh", "Họ tên học sinh", "Tài khoản học sinh", "Họ tên phụ huynh", "Tài khoản phụ huynh", "Mật khẩu mặc định"],
+      ...result.credentials.map((item) => [item.studentCode, item.studentName, item.studentUsername, item.parentName, item.parentUsername, item.password]),
+    ];
+    const blob = new Blob(["\ufeff", rows.map((row) => row.map(escape).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "Tai-khoan-hoc-sinh-phu-huynh.csv";
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  return (
+    <ModalShell title="Nhập học sinh và phụ huynh từ Excel" close={close}>
+      <div className="bulk-import-intro">
+        <span>XL</span>
+        <div><b>Mẫu Excel chuẩn EduPlan AI</b><small>8 cột: mã học sinh, họ tên, giới tính, ngày sinh, dân tộc, số điện thoại, email và họ tên phụ huynh.</small></div>
+        <a href="/Mau-nhap-hoc-sinh-EduPlan.xlsx" download>Tải mẫu Excel</a>
+      </div>
+      <div className="bulk-import-rules">
+        <p><b>Tên đăng nhập:</b> tự ghép hai từ cuối của họ tên, bỏ dấu và viết liền. Ví dụ “Trần Ngọc Lan Anh” → <code>lananh</code>.</p>
+        <p><b>Trùng tên:</b> hệ thống tự thêm số ở cuối để mỗi tài khoản là duy nhất.</p>
+        <p><b>Mật khẩu mặc định:</b> <code>Tayninh@2026</code> cho cả học sinh và phụ huynh.</p>
+      </div>
+      <label className="bulk-file-picker">
+        <span>{file ? "✓" : "⇧"}</span>
+        <div><b>{file?.name || "Chọn tệp Excel đã điền"}</b><small>{file ? `${Math.ceil(file.size / 1024)} KB · Sẵn sàng kiểm tra` : "Định dạng .xlsx · tối đa 5 MB · tối đa 1.000 học sinh/lần"}</small></div>
+        <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setFile(event.target.files?.[0] || null); setResult(null); }} />
+      </label>
+      {!result && <button className="primary full bulk-import-button" disabled={!file || busy} onClick={() => void submit()}>{busy ? "Đang kiểm tra và tạo tài khoản..." : "Kiểm tra và nhập dữ liệu thật"}</button>}
+      {result && (
+        <section className="bulk-import-result">
+          <header><div><b>{result.createdStudents ? "Nhập dữ liệu hoàn tất" : "Chưa có dữ liệu được nhập"}</b><small>{result.createdStudents} học sinh · {result.createdParents} phụ huynh · đã tự liên kết</small></div>{result.credentials.length > 0 && <button className="soft" onClick={downloadCredentials}>⇩ Tải danh sách tài khoản</button>}</header>
+          {result.credentials.length > 0 && <div className="bulk-credential-table">
+            <div className="bulk-credential-head"><span>Học sinh</span><span>Tài khoản HS</span><span>Phụ huynh</span><span>Tài khoản PH</span></div>
+            {result.credentials.map((item) => <div key={`${item.rowNumber}-${item.studentCode}`}><span><b>{item.studentName}</b><small>{item.studentCode}</small></span><code>{item.studentUsername}</code><span>{item.parentName}</span><code>{item.parentUsername}</code></div>)}
+          </div>}
+          {result.errors.length > 0 && <div className="bulk-import-errors"><b>{result.errors.length} dòng chưa nhập được</b>{result.errors.map((error) => <p key={`${error.rowNumber}-${error.message}`}>Dòng {error.rowNumber}: {error.message}</p>)}</div>}
+          {result.credentials.length > 0 && <p className="protected-note">Hãy tải danh sách tài khoản trước khi đóng cửa sổ. Vì an toàn, hệ thống không lưu mật khẩu dạng đọc được.</p>}
+        </section>
+      )}
+    </ModalShell>
+  );
+}
+
+function BulkClassImportModal({ close, notify, onImported }: {
+  close: () => void;
+  notify: (message: string, tone?: "success" | "error") => void;
+  onImported: () => Promise<void>;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{
+    createdClasses: number;
+    updatedClasses: number;
+    assignedStudents: number;
+    assignedSubjects: number;
+    errors: Array<{ sheet: string; rowNumber: number; message: string }>;
+  } | null>(null);
+  const submit = async () => {
+    if (!file) return notify("Vui lòng chọn tệp Excel .xlsx", "error");
+    setBusy(true);
+    try {
+      const form = new FormData(); form.append("file", file);
+      const response = await fetch("/api/classes/bulk", { method: "POST", body: form });
+      const payload = await response.json();
+      setResult(payload);
+      if (!response.ok) throw new Error(payload.error || "Không thể nhập danh sách lớp");
+      await onImported();
+      notify(`Đã tạo ${payload.createdClasses} lớp và gán ${payload.assignedStudents} học sinh`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Không thể nhập danh sách lớp", "error");
+    } finally { setBusy(false); }
+  };
+  const succeeded = result && result.errors.length === 0;
+  return (
+    <ModalShell title="Tạo lớp và phân công hàng loạt" close={close}>
+      <div className="bulk-import-intro class-import-intro">
+        <span>3</span>
+        <div><b>Một tệp Excel, ba danh sách liên kết</b><small>Tạo lớp và GVCN · gán học sinh · phân công GVBM theo môn học.</small></div>
+        <a href="/Mau-tao-lop-hoc-EduPlan.xlsx" download>Tải mẫu Excel</a>
+      </div>
+      <div className="class-import-steps">
+        <article><span>1</span><div><b>Lớp học</b><small>Mã lớp, tên lớp, khối và tài khoản GVCN.</small></div></article>
+        <article><span>2</span><div><b>Học sinh vào lớp</b><small>Ghép mã học sinh với mã lớp.</small></div></article>
+        <article><span>3</span><div><b>Phân công GVBM</b><small>Ghép giáo viên với môn và lớp cần dạy.</small></div></article>
+      </div>
+      <p className="protected-note">Hệ thống kiểm tra toàn bộ tệp trước. Nếu có bất kỳ dòng sai nào, dữ liệu sẽ chưa được lưu để tránh tạo lớp hoặc phân công dang dở.</p>
+      <label className="bulk-file-picker">
+        <span>{file ? "✓" : "⇧"}</span>
+        <div><b>{file?.name || "Chọn tệp Excel đã điền"}</b><small>{file ? `${Math.ceil(file.size / 1024)} KB · Sẵn sàng kiểm tra` : "Định dạng .xlsx · tối đa 8 MB"}</small></div>
+        <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setFile(event.target.files?.[0] || null); setResult(null); }} />
+      </label>
+      {!succeeded && <button className="primary full bulk-import-button" disabled={!file || busy} onClick={() => void submit()}>{busy ? "Đang kiểm tra và đồng bộ..." : result?.errors.length ? "Kiểm tra lại tệp đã sửa" : "Kiểm tra và tạo lớp"}</button>}
+      {result && (
+        <section className="class-import-result">
+          {succeeded ? <div className="class-import-success"><span>✓</span><div><b>Đã đồng bộ dữ liệu thật</b><small>{result.createdClasses} lớp mới · {result.updatedClasses} lớp cập nhật · {result.assignedStudents} học sinh · {result.assignedSubjects} phân công môn</small></div></div>
+            : <div className="bulk-import-errors"><b>{result.errors.length} dòng cần chỉnh sửa</b>{result.errors.map((error) => <p key={`${error.sheet}-${error.rowNumber}-${error.message}`}><strong>{error.sheet}</strong> · dòng {error.rowNumber}: {error.message}</p>)}</div>}
+          {succeeded && <p className="protected-note">GVCN và GVBM sẽ thấy lớp trong mục “Lớp của tôi”; học sinh thấy lớp trong mục “Lớp học”.</p>}
+        </section>
+      )}
+    </ModalShell>
+  );
+}
+
 function AccountsTable({
   accounts,
   currentKey,
@@ -2157,6 +2363,7 @@ function AccountsTable({
                 <b>{account.name}</b>
                 <small>
                   @{account.username || "chưa-thiết-lập"}
+                  {account.studentCode ? ` · Mã HS: ${account.studentCode}` : ""}
                   {account.email
                     ? ` · ${account.email}`
                     : " · Không dùng email"}
@@ -2403,9 +2610,10 @@ function ClassesGrid({
             <small>{c.subject}</small>
             <h3>Lớp {c.name}</h3>
             <p>
-              {c.members?.length ?? c.students} học sinh · Mã {c.code}
-              {c.ownerName ? ` · GV ${c.ownerName}` : ""}
+              {c.members?.length ?? c.students} học sinh · Khối {c.grade || c.name.match(/\d+/)?.[0] || "—"} · Mã {c.code}
+              {(c.homeroomTeacherName || c.ownerName) ? ` · GVCN ${c.homeroomTeacherName || c.ownerName}` : ""}
             </p>
+            {admin && c.subjectTeachers && c.subjectTeachers.length > 0 && <div className="class-teacher-list">{c.subjectTeachers.map((teacher) => <span key={`${teacher.subject}-${teacher.teacherKey}`}><b>{teacher.subject}</b> · {teacher.teacherName}</span>)}</div>}
             <div className="progress">
               <i style={{ width: `${c.progress}%` }} />
             </div>
@@ -2705,10 +2913,9 @@ function ActionModal({
             />
           </Field>
           <Field label="Môn học">
-            <input
-              onChange={(e) => set("subject", e.target.value)}
-              placeholder="Ngữ văn"
-            />
+            <select defaultValue="Ngữ văn" onChange={(e) => set("subject", e.target.value)}>
+              {SUBJECTS.map((subject) => <option key={subject}>{subject}</option>)}
+            </select>
           </Field>
           <Field wide label="Mô tả lớp">
             <textarea placeholder="Mục tiêu và ghi chú..." />

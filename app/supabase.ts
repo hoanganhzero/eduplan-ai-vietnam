@@ -49,6 +49,27 @@ export async function serverRpc<T>(action: string, payload: Record<string, unkno
   });
 }
 
+export async function bulkStudentsRpc<T>(token: string, rows: unknown[]) {
+  const { appSecret } = await runtimeConfig();
+  if (!appSecret) throw new Error("Khóa bảo mật Supabase chưa được cấu hình");
+  return rpc<T>("eduplan_bulk_students", {
+    p_secret: appSecret,
+    p_token: token,
+    p_rows: rows,
+    p_default_password: "Tayninh@2026",
+  });
+}
+
+export async function classImportRpc<T>(token: string, payload: unknown) {
+  const { appSecret } = await runtimeConfig();
+  if (!appSecret) throw new Error("Khóa bảo mật Supabase chưa được cấu hình");
+  return rpc<T>("eduplan_bulk_classes", {
+    p_secret: appSecret,
+    p_token: token,
+    p_payload: payload,
+  });
+}
+
 export async function passwordSecurityRpc<T>(action: string, payload: Record<string, unknown> = {}) {
   const { appSecret } = await runtimeConfig();
   if (!appSecret) throw new Error("Khóa bảo mật Supabase chưa được cấu hình");
